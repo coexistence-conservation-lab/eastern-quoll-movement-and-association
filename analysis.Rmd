@@ -1,0 +1,2093 @@
+---
+title: "Everybody needs good neighbours: movement and conspecific association in a reintroduced mesopredator"
+author: "Wilson B A, Evans M J, Rapley S, Gordon I J, Wimpenny C, Newport J, & Manning A D"
+date: "1 August 2023"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+    theme: cerulean
+    highlight: pygments
+editor_options: 
+  chunk_output_type: console
+  
+knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(dirname(inputFile), 'tutorial.html')) })
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+# **Background**
+
+We investigated whether conspecific associations between seven maternal **resident** (descedents of founders or reinforcers) eastern quolls (*Dasyurus viverrinus*, *murunguny* in the Indigenous Ngunnawal language) affected the establishment of eight maternal **reinforcers** (translocated from Tasmania to reinforce demographic, behavioural, and genetic diversity in the population) at [Mulligans Flat Woodland Sanctuary (MFWS)](https://www.mulligansflat.org.au/), a fenced reserve in the Australian Capital Territory.
+
+We used GPS collars to quantify distances travelled, home and core ranges, habitat use (foraging and denning), and conspecific associations. We compared these measures across three distinct periods:
+
+  1. Baseline period (residents only, days 3-21),
+  2. Release period (both cohorts, days 22-32), and
+  3. Settlement period (reinforcers only, days 33-52).
+
+# **Setup**
+
+First, we installed the [pacman Package Management Tool](https://cran.r-project.org/web/packages/pacman/index.html), which allows us to install and load subsequent packages in a condensed and efficient way.
+
+```{r, eval=FALSE}
+#install.packages(pacman)
+```
+
+```{r}
+# Install and load required packages
+pacman::p_load(adehabitatLT, corrplot, data.table, dplyr, ggplot2, ggpmisc, 
+               ggpubr, grid, gridExtra, gtools, janitor, lme4, lubridate, 
+               MuMIn, plotrix, rstudioapi, raster, readxl, rgdal, RODBC, 
+               scales, sf, sp, tidyr, tidyverse, viridis, wildlifeDI)
+```
+
+We also set the working directly to where this R markdown is saved using the `rstudioapi` package.
+
+```{r}
+# Set the working directory to where this markdown is saved
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+# **Data curation**
+
+## Prepare data
+
+Firstly, we load the required packages and read in our GPS coordinate and environment data.
+
+```{r, results='hide', warning=FALSE, message=FALSE}
+# Assign raw data filename to an object
+raw_data <- "data.xlsx"
+
+# Read in GPS data
+gps <- read_excel(raw_data, sheet="coordinates") %>% 
+  clean_names() %>% 
+  na.omit() %>%
+  mutate(date_time = as.POSIXct(aest, format="%d/%m/%Y %H:%M")) %>%
+  mutate(date = as.Date(date_time, format="%d/%m/%Y")) %>% 
+  rename(temp = temperature)
+
+# Read in environmental data
+enviro <- read_excel(raw_data, sheet="environment") %>% 
+  clean_names() %>%
+  mutate(date = as.Date(as.POSIXct(day, format="%d/%m/%Y")))
+
+# Combine GPS and environmental data
+coords <- left_join(gps, enviro, by="date")
+```
+
+Since (a) eastern quolls are active at night and (b) we configured the GPS units to collect fixes between 1700 and 0700 hours, we have simplified the categorisation of a 'quoll day' by subtracting 12 hrs from the real time each of fix so they fall on the same date. We also categorised each fix by `period`.
+  
+```{r}
+coords <- coords %>%
+  # Minus 12 hrs from date_time
+  mutate(date_time_12hr = as.character(date_time-12*60*60)) %>% 
+  mutate(date_12hr = as.Date(date_time_12hr)) %>%
+  # Create day of the year variable (1-365)
+  mutate(day_12hr = as.numeric(yday(date_12hr))) %>%
+  # Create study night variable (3-52)
+  mutate(night_12hr = (as.numeric(yday(date_12hr)) - 157)) %>% 
+  # Remove irrelevant dates  
+  subset(night_12hr >=3 & night_12hr <=52) %>%
+  mutate(period=ifelse(night_12hr >=3 & night_12hr <=21, 'Baseline', 
+                ifelse(night_12hr >=22 & night_12hr <=32, 'Release',
+                ifelse(night_12hr >=33 & night_12hr <=52, 'Settlement', NA)))) %>%
+  subset(ifelse(cohort=="Resident", night_12hr <=32, night_12hr >=22))
+#sort(unique(coords$night_12hr)) #output should range 3-52 nights
+```
+
+Errors can be present in animal locations when GPS fixes are missing or coordinates are erroneous, and these must be screened prior to analyses. For example, a quoll denning underground will limit the ability of the GPS to communicate with satellites, leading to error. 
+We filtered the dataset by six variables, starting with the following four where the GPS unit:
+
+  1. Was not working correctly (problem with `Deployment`),
+  2. Was not deployed on a `Quoll`,
+  3. Was deployed on a quoll which was caught in a trap, and
+  4. Failed to gain a fix (`Longitude`=0).
+
+```{r}
+# Filter coordinates into four dataframes
+coords_q <- subset(coords, quoll!=0)
+coords_p <- subset(coords_q, deployment=="Field")
+coords_t <- subset(coords_p, trap!="Trap")
+coords_l <- subset(coords_t, longitude!=0) %>%
+  mutate(easting = as.numeric(easting),
+         northing = as.numeric(northing))
+```
+
+## Clip by MFWS fence
+
+Next, we use the [National Vegetation Information System (version 6.0)](http://www.environment.gov.au/fed/catalog/search/resource/details.page?uuid=%7Bab942d6d-9efd-4cf2-bec7-4c1521b83803%7D) major extant vegetation groups polygon (adapted for MFWS, see Habitat use section) to classify points as **inside** or **outside** the sanctuary.
+
+```{r, message=FALSE}
+mf_fence <- st_read("shapefiles/mfws_fence.shp", quiet=TRUE) %>%
+  # Set projection using sf
+  st_set_crs("EPSG:32755") %>%
+  st_transform("EPSG:4326")
+
+coords_sp <- SpatialPointsDataFrame( 
+  data.frame(coords_l$longitude, coords_l$latitude), 
+  coords_l, proj4string=CRS("EPSG:4326")) %>% 
+  st_as_sf()
+
+# Filter fixes to those inside MFWS
+coords_filt <- st_filter(coords_sp, mf_fence) 
+
+nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp", 
+                quiet=TRUE) %>%
+  st_transform("EPSG:4326")
+
+nvis_info <- read.csv("shapefiles/mfws_nvis_vegetation_groups.csv") %>%
+  clean_names() %>%
+  dplyr::select(c(id, nvis_habitat=mvg_name, mfws_habitat=mfws_name))
+
+# Annotate polygon data to GPS df
+coords_annotated <- coords_sp %>% 
+  mutate(id=as.numeric(st_intersects(coords_sp, nvis))) %>%
+  st_drop_geometry() %>% 
+  left_join(nvis_info, by="id") %>%
+  mutate(fence=factor(ifelse(!is.na(mfws_habitat), 
+                             "Inside", "Outside"), 
+                      levels=c("Inside", "Outside")))
+```
+
+We checked this worked by mapping the coordinates.
+
+```{r, message=FALSE, fig.align="center"}
+mfws <- readOGR(dsn="shapefiles/mfws_fence.shp", verbose=FALSE) %>%
+  # Set projection using rgdal
+  spTransform(CRS("+proj=utm +zone=55 +datum=WGS84")) %>%
+  # Transform 
+  fortify(verbose=FALSE) %>% #transforms from from sp to dataframe
+  mutate(lat=as.numeric(lat + 10000000), 
+         long=as.numeric(long))
+
+# Plot coordinates 
+ggplot() + 
+  geom_path(mfws, mapping=aes(x=long, y=lat, group=group), col="grey15") +
+  geom_point(coords_annotated, 
+             mapping=aes(x=easting, y=northing, col=fence), alpha=0.6) +
+  coord_sf(xlim=c(695750, 699250), ylim=c(6104250, 6107750)) +
+  theme(panel.grid.major=element_blank(), 
+        panel.grid.minor=element_blank(),
+        panel.border=element_blank(),
+        panel.background=element_rect(fill="white"),
+        axis.text.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        legend.key=element_blank()) +
+  scale_colour_manual(values=viridis(3, begin=0.9, end=0.1), name="Fence") +
+  xlab("") + ylab("")
+```
+
+## Filter by covariates
+
+Even after filtering there are still erroneous fixes (i.e., outside the fence). Next we model whether the remaining four variables contribute to whether a fix is inside or outside the sanctuary.
+
+  5. `Duration` taken for the GPS to acquire a fix (max 75 seconds),
+  6. `Temperature` (°C) of the GPS unit
+  7. H`DOP` (horizontal dilution of precision)
+  8. Number of `Satellites` used to acquire a fix
+
+Note that while `Altitude` also had a significant effect, this is because the areas surrounding MFWS have higher terrain, so we did not include this variable.
+
+```{r}
+# Print model summary statistics for inside/outside fix predictors
+round(coef(summary(glm(fence ~ duration + temperature + 
+                       dop + satellites, 
+                       family=binomial(link=logit), 
+                    data=coords_annotated))), digits=4)
+```
+
+All four variables significantly predicted whether a point was inside or outside the fence, so we boxplotted each variable to determine whether points inside where generally higher or lower for each variable.
+
+```{r, warning=FALSE, fig.align="center", fig.width=9, fig.height=6}
+duration <- ggplot() + 
+  geom_boxplot(coords_annotated, 
+               mapping=aes(x=fence, y=duration, fill=fence), 
+               col="grey15", alpha=0.8) +
+  theme(legend.position="none", 
+        axis.line=element_line(colour="black"),
+        panel.background=element_rect(fill="white")) + 
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  xlab("") + ylab("Duration (seconds)")
+
+temperature <- ggplot() + 
+  geom_boxplot(coords_annotated, mapping=aes(x=fence, y=temperature, fill=fence), 
+               col="grey15", alpha=0.8) +
+  theme(legend.position="none", 
+        axis.line=element_line(colour="black"),
+        panel.background=element_rect(fill="white")) +
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  xlab("") + ylab("Temperature (Celsius)")
+
+hdop <- ggplot() + 
+  geom_boxplot(coords_annotated, mapping=aes(x=fence, y=dop, fill=fence), 
+               col="grey15", alpha=0.8) +
+  theme(legend.position="none", 
+        axis.line=element_line(colour="black"),
+        panel.background=element_rect(fill="white")) +
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  xlab("") + ylab("Horizontal dilution \nof precision")
+
+satellites <- ggplot() + 
+  geom_boxplot(coords_annotated, 
+               mapping=aes(x=fence, y=satellites, fill=fence), col="grey15", alpha=0.8) +
+  theme(legend.position="none", 
+        axis.line=element_line(colour="black"),
+        panel.background=element_rect(fill="white")) +
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  xlab("") + ylab("Number of satellites")
+
+covariates <- ggarrange(duration, temperature, hdop, satellites, 
+                        ncol=2, nrow=2, hjust=-0.1, vjust=1.5,
+                        label.x=0.89, label.y=0.99, #library(ggpubr)
+                        font.label=list(size=10, face="bold", color="black"))
+covariates
+```
+
+```{r, include=FALSE}
+ggsave(filename="Fig - data curation boxplots.jpeg", 
+       covariates, width=200, height=100, units="mm")
+```
+
+Based on this exploration, we filtered fixes that were in the first or third quartile for the 'inside' fixes, as follows:
+
+  5. `duration` ≤ Q3 (54 seconds)
+  6. `temp`erature ≥ Q1 (17°C)
+  7. H`DOP` ≤ Q3 (2.6)
+  8. `satellites` ≥ Q1 (5)
+
+After filtering the fixes by all eight variables, there were only 21 'outside' fixes left, which we removed manually.
+
+```{r}
+coords_d <- subset(coords_annotated, duration<=54)
+coords_c <- subset(coords_d, temp>=17)
+coords_h <- subset(coords_c, dop<=2.6)
+coords_s <- subset(coords_h, satellites>=5)
+coords_f <- subset(coords_s, fence=="Inside") %>%
+    mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
+
+write.csv(coords_f, "Data - coordinates curated.csv")
+```
+
+Below is a tabulated summary of the fixes removed by each variable's threshold.
+
+```{r, fig.align="center"}
+table <- data.frame("Variable"=c("Raw dataset", "Quoll", 
+                                 "Deployment status",  
+                                 "Animal in trap", "Longitude", 
+                                 "Duration", "Temperature", "HDOP", 
+                                 "Number of satellites", "Fence"),
+  "Threshold"=c("-", "= Quoll", "= Field", "≠ Trap", "≠ 0", "≤ Q3 (54s)", 
+                "≥ Q1 (17°C)", "≤ Q3 (2.6)", "≥ Q1 (5)", "Inside"),
+  "Fixes inside"=c("-", "-", "-", "-", "-",
+                   sum(coords_d$fence=="Inside"), 
+                   sum(coords_c$fence=="Inside"), 
+                   sum(coords_h$fence=="Inside"), 
+                   sum(coords_s$fence=="Inside"),
+                   sum(coords_f$fence=="Inside")),
+  "Outside"=c("-", "-", "-", "-", "-", 
+              sum(coords_d$fence=="Outside"),
+              sum(coords_c$fence=="Outside"), 
+              sum(coords_h$fence=="Outside"), 
+              sum(coords_s$fence=="Outside"),
+              sum(coords_f$fence=="Outside")), 
+  "Removed"=c(nrow(coords)-nrow(coords), 
+              nrow(coords)-nrow(coords_q), 
+              nrow(coords_q)-nrow(coords_p), 
+              nrow(coords_p)-nrow(coords_t),
+              nrow(coords_t)-nrow(coords_l), 
+              nrow(coords_l)-nrow(coords_d),
+              nrow(coords_d)-nrow(coords_c), 
+              nrow(coords_c)-nrow(coords_h),
+              nrow(coords_h)-nrow(coords_s), 
+              nrow(coords_s)-nrow(coords_f)),
+  "Remaining"=c(nrow(coords), nrow(coords_q), 
+                nrow(coords_p), nrow(coords_t), 
+                nrow(coords_l), nrow(coords_d), 
+                nrow(coords_c), nrow(coords_h), 
+                nrow(coords_s), nrow(coords_f)))
+
+curation_table <- tableGrob(table, rows=NULL)
+grid.draw(curation_table)
+```
+
+# **Distance**
+
+We calculated the linear `distance` (metres) between consecutive locations divided by the number of fixes, to account for the varying number of positions and the fact that accuracy increases with increasing number of fixes.
+
+## **Data curation**
+
+```{r}
+data <- read.csv("Data - coordinates curated.csv")
+quolls <- unique(sort(data$name)) #vector of identities
+distance_fix <- data.frame()
+
+for(i in quolls){
+  quolls <- subset(data, name==i)
+  quolls$name <- factor(quolls$name) #converts to factor
+  
+  night <- as.POSIXct(strptime(as.character(quolls$date_time_12hr),
+                               format="%Y-%m-%d %H:%M")) #converts date
+  data.xy=quolls[c("easting", "northing")]
+  xysp <- SpatialPoints(data.xy) #class Spatial Points for fixes
+  proj4string(xysp) <- CRS("+proj=utm +zone=55 +datum=WGS84")
+  sppt <- data.frame(xysp) #spatial df
+  idsp <- data.frame(quolls$name) #spatial df with ids
+  merge <- data.frame(idsp) #merges id and date in spatial df
+  coordinates(merge) <- sppt #adds id and date df to spatial df
+  move <- as.ltraj(xy=quolls[,c("easting","northing")], 
+                   date=night, id=idsp) #library(adehabitatLT) stores movements
+  
+  distance <- move[[1]]$dist #distance in metres
+  quolls <- cbind(quolls, distance)
+  distance_fix <- rbind(distance_fix, quolls)
+}
+```
+
+Here we used distance per fix to calculate distance per night (adjusted for number of fixes), and combine the environmental data to use as random effects in our modelling.
+
+```{r}
+distance_night <- distance_fix %>% #distance per night
+  mutate(distance = as.numeric(distance/1000), #gives kilometres
+         night_12hr = as.numeric(night_12hr)) %>% 
+  group_by(cohort, period, morph, name, date_12hr, night_12hr) %>%
+  summarise(distance = sum(distance), 
+            fixes = length(name)) %>% #to adjust for number of fixes
+  mutate(distance_fix = distance/fixes,
+         distance_night = distance,
+         cohort = factor(cohort, levels=c("Resident","Reinforcer"))) %>%
+  na.omit()
+
+data <- distance_night %>% na.omit() %>%
+  mutate(date_12hr = as.POSIXct(strptime(date_12hr, format="%Y-%m-%d",
+                                         tz="Australia/Sydney")))
+
+enviro <- read_excel(raw_data, sheet="environment") %>% 
+  clean_names() %>%
+  mutate(date_12hr = as.POSIXct(strptime(day, format="%Y-%m-%d"))) %>%
+  subset(date_12hr>"2018-06-07" & date_12hr<"2018-07-31") %>%
+  mutate_at(c(2:5), as.numeric)
+
+model_data <- as.data.frame(left_join(data, enviro, by="date_12hr"))
+```
+
+<br />
+
+## **Models**
+
+Next we use generalised linear mixed-effects models (GLMMs) to test the fixed effects of `cohort`, `period`, and `morph` on the distances each quoll travelled per fix and per night, with individual (`name`), `precip`itation, `min_temp`erature, `max_temp`erature, and `moon` illumination included as random effects.
+
+```{r, warning=FALSE, message=FALSE}
+# Print model statistics for fixes and random predictors
+round(coef(summary(lmer(distance_fix ~ morph + (period*cohort) + 
+                (1|name) + (1|precip) + (1|min_temp) + 
+                (1|moon), data=model_data))), digits=3)
+
+# Print model statistics for fixes and random predictors
+round(coef(summary(lmer(distance_night ~ morph + (period*cohort) +
+                (1|name) + (1|precip) + (1|min_temp) + 
+                (1|moon), data=model_data))), digits=3)
+```
+
+## Summary statistics
+
+```{r}
+data.frame(Measure=c("Distance per fix:", "Distance per night:"),
+           Mean=c(mean(model_data$distance_fix), 
+                  mean(model_data$distance_night)),
+           SE=c(std.error(model_data$distance_fix), 
+                std.error(model_data$distance_night)))
+```
+
+We found no significant differences in distance travelled per fix for any of the fixed effects (*p* > 0.05). On average, eastern quolls travelled 0.23 km (±0.01 SE) per fix, and 1.75 km (±0.08 SE) per night.
+
+## Plot
+
+Finally, we plot mean distance across all individuals since no fixed effects were significant.
+
+```{r, fig.align="center", fig.width=4, fig.height=3}
+dist_plot <- ggplot(data=distance_night, 
+                    aes(y=as.numeric(distance))) +
+  geom_boxplot(fill=viridis(1, begin=0.5), 
+               col="grey15", size=0.6, alpha=0.8) +
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.background=element_rect(fill="white"),
+        axis.line=element_line(colour="black"),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        legend.position="none",
+        strip.background=element_rect(colour="black", fill="grey15"), 
+        strip.text=element_text(colour="white")) +
+  ylab("Distance travelled per night (km)")
+dist_plot
+```
+
+```{r, include=FALSE}
+jpeg(file="Fig - distance across individuals.jpeg", 
+     width=2000, height=1500, units="px", res=500)
+dist_plot
+dev.off()
+```
+
+# **Range**
+
+## Home and core ranges
+
+We used the kernel utilisation distribution (KUD) model to calculate `home` ranges (eliminating outlying, exploratory locations, 95% contour) and `core` areas (area used with greater intensity, 50% contour). We  calculate ranges per *night*, *individual*, and *period*.
+
+### Range per night
+
+```{r}
+data <- read.csv("Data - coordinates curated.csv") %>%
+  mutate(night_date=as.POSIXct(strptime(date_time_12hr, 
+                                        format="%Y-%m-%d")))
+coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
+                                 data$northing)), data=data)
+```
+
+```{r, eval=FALSE}
+quolls <- as.character(unique(coords$name))
+days <- unique(strftime(coords[["night_date"]]))
+ranges <- data.frame()
+
+for (i in 1:length(quolls)) {
+  for (j in 1:length(days)) {
+    points <- subset(coords, name==quolls[i] & date==days[j], select=name)
+    if (nrow(points)<5) 
+      {next}
+    kud <- kernelUD(points, h="href", grid=500, extent=8)
+    home_range <- getverticeshr(kud, percent=95) #in hectares
+    core_range <- getverticeshr(kud, percent=50) #in hectares
+    out <- as.data.frame(x=cbind(home_range[["area"]], 
+                                 core_range[["area"]], 
+                                 quolls[i], days[j])) %>% 
+      rename(home_range=V1, core_range=V2, name=V3, night_date=V4)
+    print(out)
+    ranges <- rbind.data.frame(ranges, out) }}
+write.csv(ranges, "Data - raw ranges per day.csv")
+```
+
+```{r}
+ranges_day <- read.csv("Data - raw ranges per day.csv") %>% #format time
+  mutate(night_date=as.POSIXct(strptime(night_date, format="%Y-%m-%d",
+                                        tz="Australia/Sydney")))
+
+ranges_data <- data %>% #add day and night numbers
+  dplyr::select(night_date, night_12hr, day_12hr) %>%
+  group_by(night_date, night_12hr, day_12hr) %>%
+  summarise(n=length(night_12hr)) %>%
+  merge(ranges_day, by="night_date") %>%
+  dplyr::select(-n)
+
+#lookup table to add cohort and morph back in
+periods <- read.csv("Data - coordinates curated.csv") %>%
+  group_by(cohort, period, morph, name) %>%
+  summarise(fixes=length(name))
+study <- read.csv("Data - coordinates curated.csv") %>%
+  group_by(cohort, morph, name) %>%
+  summarise(fixes=length(name)) %>%
+  mutate(period="Study")
+lookup <- bind_rows(periods, study)
+
+ranges_data <- ranges_data %>% #add study period
+  mutate(period=ifelse(night_12hr <=19, 'Baseline', 
+                ifelse(night_12hr >=20 & night_12hr <=28, 'Release',
+                ifelse(night_12hr >=29, 'Settlement', NA)))) %>% 
+  merge(lookup, by=c("name","period")) #add cohort and morph
+write.csv(ranges_data,"Data - ranges per day.csv")
+```
+
+### Range per individual
+
+```{r}
+data <- read.csv("Data - coordinates curated.csv")
+coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
+                                 data$northing)), data=data)
+kud <- kernelUD(coords[,6], h="href", grid=500)
+
+home_range <- getverticeshr(kud, percent=95) %>% #home range 95% 
+  st_as_sf() %>% #convert df to spatial object
+  st_set_crs(st_crs("EPSG:32755")) #set CRS to UTM
+
+core_range <- getverticeshr(kud, percent=50) %>% #core range 50% 
+  st_as_sf() %>% #convert df to spatial object
+  st_set_crs(st_crs("EPSG:32755")) #set CRS to UTM
+
+ranges_study <- data.frame(left_join(st_drop_geometry(home_range), #extract areas
+                                     st_drop_geometry(core_range), by="id")) %>%
+  rename(home_range=area.x, core_range=area.y, name=id) %>%
+  mutate(period="Study")
+```
+
+### Range per period
+
+```{r, eval=FALSE}
+data <- read.csv("Data - coordinates curated.csv") %>%
+  mutate(period=as.character(period))
+coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
+                                 data$northing)), data=data)
+quolls <- unique(data$name)
+period <- unique(data$period)
+
+#home range
+hr <- data.frame()
+for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
+  
+  baseline <- coords %>% subset(name==quolls[i] & period=="Baseline", select=name)
+  try(baseline <- baseline %>%
+        kernelUD(h="href", grid=500, extent=10) %>%
+        getverticeshr(percent=95) %>%
+        st_as_sf() %>% #convert from dataframe to a spatial object
+        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        mutate(period="Baseline"))
+  print(baseline)
+  hr <- rbind.data.frame(hr, baseline)
+  
+  release <- coords %>% subset(name==quolls[i] & period=="Release", select=name)
+  try(release <- release %>%
+        kernelUD(h="href", grid=500, extent=10) %>%
+        getverticeshr(percent=95) %>%
+        st_as_sf() %>% #convert from dataframe to a spatial object
+        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        mutate(period="Release"))
+  print(release)
+  hr <- rbind.data.frame(hr, release)
+  
+  settlement <- coords %>% subset(name==quolls[i] & period=="Settlement", select=name)
+  try(settlement <- settlement %>%
+        kernelUD(h="href", grid=500, extent=10) %>%
+        getverticeshr(percent=95) %>%
+        st_as_sf() %>% #convert from dataframe to a spatial object
+        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        mutate(period="Settlement"))
+  print(settlement)
+  hr <- rbind.data.frame(hr, settlement)
+  }
+
+#core range
+cr <- data.frame()
+for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
+  
+  baseline <- coords %>% subset(name==quolls[i] & period=="Baseline", select=name)
+  try(baseline <- baseline %>%
+        kernelUD(h="href", grid=500, extent=10) %>%
+        getverticeshr(percent=50) %>%
+        st_as_sf() %>% #convert from dataframe to a spatial object
+        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        mutate(period="Baseline"))
+  print(baseline)
+  cr <- rbind.data.frame(cr, baseline)
+  
+  release <- coords %>% subset(name==quolls[i] & period=="Release", select=name)
+  try(release <- release %>%
+        kernelUD(h="href", grid=500, extent=10) %>%
+        getverticeshr(percent=50) %>%
+        st_as_sf() %>% #convert from dataframe to a spatial object
+        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        mutate(period="Release"))
+  print(release)
+  cr <- rbind.data.frame(cr, release)
+  
+  settlement <- coords %>% subset(name==quolls[i] & period=="Settlement", select=name)
+  try(settlement <- settlement %>%
+        kernelUD(h="href", grid=500, extent=10) %>%
+        getverticeshr(percent=50) %>%
+        st_as_sf() %>% #convert from dataframe to a spatial object
+        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        mutate(period="Settlement"))
+  print(settlement)
+  cr <- rbind.data.frame(cr, settlement)
+}
+
+ranges_period <- data.frame(left_join(st_drop_geometry(hr), #extract areas
+                                      st_drop_geometry(cr), 
+                                      by=c("id", "period"))) %>%
+  rename(home_range=area.x, core_range=area.y, name=id)
+
+ranges <- rbind(ranges_period, ranges_study) %>%
+  merge(lookup, by=c("name","period"))
+write.csv(ranges, "Data - ranges per period.csv")
+```
+
+### Models and summaries
+
+Next we use a GLMs to test the fixed effects of `cohort`, `period`, and `morph` on the home and core ranges of each quoll.
+
+```{r}
+ranges_model <- read.csv("Data - ranges per period.csv") %>% 
+  subset(period!="Study") %>%
+  mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
+
+round(coef(summary(glm(home_range ~ cohort + period + morph, 
+                       data=ranges_model))), digits=4)
+
+round(coef(summary(glm(core_range ~ cohort + period + morph, 
+                       data=ranges_model))), digits=4)
+```
+
+We found there were significant differences between `cohort`s for `home_range` (*p* < 0.02) and `core_range` (*p* < 0.0403). 
+
+We also ran a linear model to assess whether daily home and core ranges changed over time, we found the most parsimonious model included both cohort (home range p < 0.0002, core range p < 0.0001) and study night (home range p < 0.01, core range p < 0.0074).
+
+```{r}
+ranges_data <- read.csv("Data - ranges per day.csv") %>%
+    mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
+
+round(coef(summary(glm(home_range ~ night_12hr + cohort + morph, 
+                       data=ranges_data))), digits=4)
+
+round(coef(summary(glm(core_range ~ night_12hr + cohort + morph, 
+                       data=ranges_data))), digits=4)
+
+ranges_res <- subset(ranges_data, cohort=="Resident")
+ranges_fou <- subset(ranges_data, cohort=="Reinforcer")
+
+ggplot(data = ranges_res, aes(night_12hr, home_range)) +
+  stat_poly_line() + stat_poly_eq() + geom_point()
+
+ggplot(data = ranges_fou, aes(night_12hr, home_range)) +
+  stat_poly_line() + stat_poly_eq() + geom_point()
+```
+
+We found residents exhibited relatively constant ranges (home range R2 = 0.02, core range R2 = 0.01), and reinforcers exhibited significantly negative trends in ranges (home and core ranges R2 = 0.07) over the study period.
+
+```{r}
+res_ranges <- subset(ranges_model, cohort=="Resident")
+fou_ranges <- subset(ranges_model, cohort=="Reinforcer")
+
+data.frame(Cohort=c("Resident", "Resident", "Reinforcer", "Reinforcer"), 
+           Measure=rep(c("Home range (ha):", "Core range (ha):"), 2),
+           Mean=c(mean(res_ranges$home_range), 
+                  mean(res_ranges$core_range),
+                  mean(fou_ranges$home_range), 
+                  mean(fou_ranges$core_range)),
+           SE=c(std.error(res_ranges$home_range), 
+                std.error(res_ranges$core_range),
+                std.error(fou_ranges$home_range), 
+                std.error(fou_ranges$core_range)))
+```
+
+On average, resident home ranges were 89.89 ha (±11.46) and core ranges were 19.93 ha (±2.45), and reinforcer home ranges were 249.39 ha (±53.16) and core ranges were 47.32 ha (±11.25).
+
+## Conspecific overlap
+
+### Data curation
+
+We also calculated the area of home and core range overlap (or static interaction) between dyads (pairs) of individuals using `st_intersection`.
+
+```{r, eval=FALSE, results='hide'}
+#home range
+ggplot(home_range) + 
+  geom_sf(aes(fill=id), alpha=0.2)
+list <- unique(home_range$id)
+out <- data.frame()
+
+for(i in 1:length(list)) {
+  for (j in i+1:length(list)) {
+  overlap <- st_intersection(filter(home_range, id==list[i]),
+                        filter(home_range, id==list[j]))
+  print(overlap)
+  out <- rbind(out, overlap) }} #20 seconds
+
+home_overlap <- out %>% 
+  mutate(area_int=as.numeric(st_area(.))*0.0001) %>%
+  rename(name=id, name2=id.1, overlap=area_int) %>%
+  dplyr::select(-area, -area.1)
+
+#core range
+ggplot(core_range) + geom_sf(aes(fill=id), alpha=0.2)
+list <- unique(core_range$id)
+out <- data.frame()
+
+for(i in 1:length(list)) {
+  for (j in i+1:length(list)) {
+  overlap <- st_intersection(filter(core_range, id==list[i]),
+                        filter(core_range, id==list[j]))
+  print(overlap)
+  out <- rbind(out, overlap) }} #20 seconds
+
+core_overlap <- out %>% 
+  mutate(area_int=as.numeric(st_area(.))*0.0001) %>%
+  rename(name=id, name2=id.1, overlap=area_int) %>%
+  dplyr::select(-area, -area.1)
+
+#combining
+overlap <- data.frame(left_join(st_drop_geometry(home_overlap), #extract areas
+                                st_drop_geometry(core_overlap), 
+                                by=c("name", "name2"))) %>%
+  rename(home_overlap=overlap.x, core_overlap=overlap.y)
+
+lookup_distinct <- as.data.frame(lookup) %>% 
+  dplyr::select(-period, -fixes) %>%
+  distinct(name, cohort, morph) 
+
+lookup_distinct2 <- lookup_distinct %>%
+  rename(name2=name, cohort2=cohort, morph2=morph) #to lookup cohort of second quoll
+
+overlap <- overlap %>%
+  merge(lookup_distinct, by=c("name")) %>%
+  merge(lookup_distinct2, by=c("name2")) %>%  
+  mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
+overlap[is.na(overlap)] <- 0
+
+write.csv(overlap, "Data - overlap per individual.csv")
+```
+
+### **Models and summaries**
+
+```{r}
+overlap <- read.csv("Data - overlap per individual.csv") %>%
+    mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
+
+round(coef(summary(glm(home_overlap ~ cohort + morph, 
+                       data=overlap))), digits=5)
+
+round(coef(summary(glm(core_overlap ~ cohort + morph, 
+                       data=overlap))), digits=5)
+```
+
+We found significant differences between cohorts in the area of home (*p* < 0.0001) and core (*p* < 0.006) ranges that overlapped with those of other collared eastern quolls. 
+
+```{r}
+res_overlap <- subset(overlap, cohort=="Resident") %>% na.omit()
+fou_overlap <- subset(overlap, cohort=="Reinforcer") %>% na.omit()
+
+data.frame(Cohort=c("Resident", "Resident", "Reinforcer", "Reinforcer"), 
+           Measure=rep(c("Home range (ha):", "Core range (ha):"), 2),
+           Mean=c(mean(res_overlap$home_overlap), 
+                  mean(res_overlap$core_overlap),
+                  mean(fou_overlap$home_overlap), 
+                  mean(fou_overlap$core_overlap)),
+           SE=c(std.error(res_overlap$home_overlap), 
+                std.error(res_overlap$core_overlap),
+                std.error(fou_overlap$home_overlap), 
+                std.error(fou_overlap$core_overlap)))
+```
+
+On average, resident home ranges overlapped by 45.99 ha (±4.15) and core ranges overlapped by 3.85 ha (±0.65), while reinforcer home ranges overlapped significantly more (by 115.09 ha, ±15.28), and core ranges overlapped by 8.54 ha (±1.99).
+
+## Plots
+
+Finally, we plotted the significant differences in home range and home range overlap by cohort and study night.
+
+```{r, fig.align="center", fig.width=6, fig.height=3}
+# Boxplot
+home_boxplot <- ggplot(data=ranges_model, 
+                      aes(x=cohort, y=as.numeric(home_range))) +
+  geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.background=element_rect(fill="white"),
+        plot.margin=unit(c(0.1, 0, 0, 0), "cm"),
+        axis.line=element_line(colour="black"),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        legend.position="none") +
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  xlab("Cohort") + ylab("Home range (hectares)") +
+  annotate(geom="text", x=1, y=600, label="a", fontface="bold", size=6)
+
+# Regression plot
+home_time <- ggplot(data=ranges_data, aes(x=night_12hr, 
+                                          y=as.numeric(home_range))) +
+  geom_smooth(method='lm', aes(fill=cohort), alpha=0.6, col="grey15") +
+  theme(panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.background=element_rect(fill="white"),
+        plot.margin=unit(c(0.1, 0, 0, 0.2), "cm"),
+        legend.position=c(0.20, 0.8),
+        axis.line=element_line(colour="black"),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        strip.background=element_rect(colour="black", fill="grey15"), 
+        strip.text=element_text(colour="white")) +
+  #scale_colour_manual(values=viridis(2, begin=0.9, end=0.5)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.5)) +
+  xlab("Study night") + ylab(expression(paste(""))) +
+  labs(fill="Cohort") +
+  annotate(geom="text", x=45, y=300, label="b", fontface="bold", size=6)
+
+# Boxplot
+home_overlap_plot <- ggplot(overlap, aes(x=cohort, 
+                                         y=as.numeric(home_overlap))) +
+  geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        legend.position = "none",
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        strip.background = element_rect(colour="black", fill="grey15"), 
+        strip.text = element_text(colour="white")) +
+  scale_colour_manual(values=viridis(2, begin=0.9, end=0.5)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.5)) +
+  xlab("Cohort") + labs(fill="Cohort") +
+  ylab(expression(paste("Home range overlap (hectares)"))) +
+  annotate(geom="text", x=1, y=250, label="c", fontface="bold", size=6)
+home_overlap_plot
+
+ranges_plot <- ggarrange(home_boxplot, home_time,home_overlap_plot,
+                         ncol=3, nrow=1, widths=c(3,3,3))
+ranges_plot
+```
+
+```{r, include=FALSE}
+jpeg(file="Fig - ranges per cohort.jpeg", 
+     width=4750, height=1500, units="px", res=500)
+ranges_plot
+dev.off()
+```
+
+## ⚠️Den overlap
+
+Here we calculate the percentage of dens that occurred within each animal's core range (50% KUD).
+
+*Flag*
+
+```{r, eval=FALSE}
+pacman::p_load(data.table, readxl, sf, sp)
+
+diu <- read_excel(raw_data, sheet="dens") %>% 
+  clean_names() %>% na.omit() %>%
+  mutate(easting=as.numeric(easting), 
+         northing=as.numeric(northing), 
+         date=as.POSIXct(date_tracked), 
+         day=as.numeric(yday(date)), #day of the year variable
+         night=(as.numeric(yday(date)) - 157), #night variable)
+         period=ifelse(night >=3 & night <=21, 'Baseline', 
+                ifelse(night >=22 & night <=32, 'Release',
+                ifelse(night >=33 & night <=52, 'Settlement', NA)))) %>%
+  # Remove irrelevant dates
+  subset(night >=3 & night <=52) %>%
+  subset(ifelse(cohort=="Resident", night <=32, night >=22))
+
+diu_sp <- SpatialPointsDataFrame( #library(sp)
+  data.frame(diu$easting, diu$northing), diu,
+  proj4string=CRS("EPSG:32755")) %>% 
+  st_as_sf()
+
+#want to label points as inside the core range of their respective quoll
+diu_core <- st_join(diu_sp, core_range, join=st_intersects) %>%
+  st_drop_geometry()
+```
+
+For identifying inside and outside locations:
+
+```{r, eval=FALSE}
+coords_filt <- st_filter(coords_sp, mf_fence) #filter fixes to inside MF fence
+
+nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp", quiet=TRUE) %>%
+  st_transform("EPSG:4326")
+
+nvis_info <- read.csv("shapefiles/mfws_nvis_vegetation_groups.csv") %>%
+  clean_names() %>%
+  dplyr::select(c(id, nvis_habitat=mvg_name, mfws_habitat=mfws_name))
+
+coords_annotated <- coords_sp %>% #annotate polygon info to coords
+  mutate(id=as.numeric(st_intersects(coords_sp, nvis))) %>%
+  st_drop_geometry() %>% 
+  left_join(nvis_info, by="id") %>%
+  mutate(fence=factor(ifelse(!is.na(mfws_habitat), 
+                             "Inside", "Outside"), 
+                      levels=c("Inside", "Outside")))
+```
+
+Prep for modelling:
+
+```{r, eval=FALSE}
+diu_adj <- diu_nvis %>%
+  group_by(mfws_habitat) %>% count() %>% 
+  mutate(freq=n, perc=(freq/413)*100) #adjusted by frequency of dens
+
+diu_plot <- diu_adj %>%  clean_names() %>%
+  left_join(mfws_group, by="mfws_habitat") %>%
+  mutate(freq_adj=freq/area, #adjusted by total area
+         perc_adj=(freq_adj/383.1) *100, #adjusted by total freq_adj
+         mfws_habitat=factor(mfws_habitat, 
+                             levels=c("Eucalypt woodland", 
+                                      "Eucalypt forest", 
+                                      "Regrowth", "Grassland",
+                                      "Aquatic")))
+#data for modelling
+diu_period <- diu_nvis %>%
+  group_by(cohort, period, morph, name, mfws_habitat) %>%
+  summarise(dens=length(mfws_habitat))
+
+diu_total <- diu_period %>%
+  group_by(cohort, period, morph, name) %>%
+  summarise(total=sum(dens))
+  
+diu_model <- left_join(diu_period, diu_total) %>%
+  mutate(percentage=(100/total)*dens, 
+         mfws_habitat=factor(mfws_habitat, 
+                             levels=c("Eucalypt woodland", 
+                                      "Eucalypt forest", 
+                                      "Regrowth", "Grassland",
+                                      "Aquatic")))
+```
+
+# **Habitat use**
+
+Here we investigated eastern quoll nocturnal activity (GPS fixes) and diurnal denning (VHF fixes), in terms of habitat type (NVIS polygons) and habitat attributes (LiDAR rasters).
+
+Firstly, we used the [National Vegetation Information System (version 6.0)](http://www.environment.gov.au/fed/catalog/search/resource/details.page?uuid=%7Bab942d6d-9efd-4cf2-bec7-4c1521b83803%7D) major extant vegetation groups we created earlier ('Clip by MFWS fence' section) to create five broad habitat types relevant to MFWS. Below we visualised how the eight NVIS vegetation groups were aggregated into the five MFWS habitat types by **barplot** and **map**.
+  
+```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=6}
+nvis_shp <- readOGR(dsn="shapefiles/mfws_nvis_vegetation_groups.shp") %>%
+  spTransform(CRS("+proj=longlat +ellps=WGS84 +datum=WGS84")) 
+nvis_shp$area <- raster::area(nvis_shp)/1000000 #library(raster) in km2
+fortify <- fortify(nvis_shp) #transforms from from sp to dataframe
+
+nvis_groups <- aggregate(nvis_shp$area, 
+                         list(nvis_habitat=nvis_shp$MVG_NAME, 
+                              mfws_habitat=nvis_shp$MFWS_NAME), sum)
+
+nvis_groups <- nvis_groups %>% 
+  mutate(area=x, perc=(area/4.839729)*100) %>%
+  dplyr::select(-3) %>% na.omit() %>%
+  mutate(nvis_habitat=factor(nvis_habitat, 
+                      levels=c("Eucalypt Woodlands", 
+                               "Eucalypt Open Woodlands", 
+                               "Regrowth, modified native vegetation", 
+                               "Tussock Grasslands", 
+                               "Eucalypt Open Forests", 
+                               "Eucalypt Tall Open Forests", 
+                               "Inland aquatic - freshwater, salt lakes, lagoons", 
+                               "Other Grasslands, Herblands, Sedgelands and Rushlands")), 
+         mfws_habitat=factor(mfws_habitat, 
+                      levels=c("Eucalypt woodland", 
+                               "Eucalypt forest", 
+                               "Regrowth", "Grassland", 
+                               "Aquatic"))) %>% arrange(-area)
+
+# Barplot
+nvis_barplot <- ggplot(nvis_groups, col="grey15",
+                       aes(x=nvis_habitat, y=area, fill=mfws_habitat)) + 
+  geom_col(size=0.5, col="grey15", alpha=0.8) +
+  geom_text(aes(label = paste0(round(perc, digits=1), "%"), vjust=-0.5)) +
+  theme(axis.line.x = element_line(colour="black"),
+        axis.line.y = element_line(colour="black"),
+        legend.position = "none",
+        plot.margin = unit(c(0.2, 0.1, 0.1, 0.1), "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(hjust=0.5),
+        text = element_text(colour="black"),
+        axis.text.y = element_text(angle=0, vjust=0.5, 
+                                   hjust=0, color="black"),
+        axis.text.x = element_text(angle=0, vjust=1, 
+                                   hjust=0.5, color="black")) +
+  scale_fill_manual(values=viridis(5, begin=0.9, end=0.1)) +
+  scale_x_discrete(labels=wrap_format(3)) + #library(scales)
+  scale_y_continuous(limits=c(0,2.2)) +
+  labs(fill="MFWS habitat") +
+  xlab("NVIS major vegetation group") + 
+  ylab(expression(paste("Area (", km^2, ")"))) +
+  annotate(geom="text", x=8, y=2.0, label="a", fontface="bold", size=6)
+
+# Map plot
+nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp") %>%
+  st_transform("EPSG:4326") %>% 
+  clean_names() %>% 
+  mutate(mfws_name=factor(mfws_name, 
+                          levels=c("Eucalypt woodland", 
+                                   "Eucalypt forest", "Regrowth", 
+                                   "Grassland", "Aquatic")))
+nvis_mfws <- ggplot() + 
+  geom_sf(nvis, mapping=aes(fill=mfws_name), col="grey15", alpha=0.8) + 
+  theme(axis.line.x = element_blank(),
+        axis.line.y = element_blank(),
+        legend.position = c(0.75, 0.15),
+        legend.title = element_text(size=9), 
+        legend.text = element_text(size=9),
+        legend.key.size = unit(0.5, 'cm'),
+        plot.margin = unit(c(0, 0, 1, 0), "cm"),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.ticks.length = unit(0, "pt"),
+        plot.title = element_text(hjust=0.5),
+        text = element_text(colour="black"),
+        axis.text.y = element_blank(),
+        axis.text.x = element_blank()) +
+  scale_fill_manual(values=viridis(5, begin=0.9, end=0.1)) +
+  labs(fill="MFWS habitat", x=NULL, y=NULL) +
+  annotate(geom="text", y=-35.157, x=149.186, 
+           label="b", fontface="bold", size=6)
+
+nvis_methods <- ggarrange(nvis_barplot, nvis_mfws, 
+                          ncol=2, nrow=1, widths=c(4.75, 3))
+nvis_methods
+```
+
+```{r, include=FALSE}
+jpeg(file="Fig - nvis habitat barplot and map.jpeg", 
+     width=5000, height=2000, units="px", res=500)
+print(nvis_methods)
+dev.off()
+```
+
+## Nocturnal activity
+
+### Habitat type
+
+Here we calculate the frequency of nocturnal locations (GPS fixes) per habitat type, adjusting these for habitat availability (area).
+
+```{r}
+#data for plots
+noc <- read.csv("Data - coordinates curated.csv") %>%
+  group_by(mfws_habitat) %>% count() %>% 
+  # Create frequency and percentage (adjusted by frequency of fixes) variables
+  mutate(freq=n, perc=(freq/2950)*100)
+
+mfws_group <- as.data.frame(nvis_shp) %>% clean_names() %>%
+  mutate(mfws_habitat=mfws_name) %>%
+  group_by(mfws_habitat) %>%
+  summarise(area=sum(area))
+
+noc_plot <- noc %>% clean_names() %>%
+  left_join(mfws_group, by="mfws_habitat") %>%
+  # Adjust frequency by total area
+  mutate(freq_adj=freq/area, 
+         # Adjust percentage by total frequencies
+         perc_adj=(freq_adj/2343.5) *100,
+         mfws_habitat=factor(mfws_habitat, 
+                             levels=c("Eucalypt woodland", 
+                                      "Eucalypt forest", 
+                                      "Regrowth", "Grassland",
+                                      "Aquatic")),
+         type="Nocturnal activity")
+
+# Read in coordinates for modelling
+noc_period <- read.csv("Data - coordinates curated.csv") %>%
+  group_by(cohort, period, morph, name, mfws_habitat) %>%
+  summarise(fixes=length(mfws_habitat))
+
+noc_total <- noc_period %>%
+  group_by(cohort, period, morph, name) %>%
+  summarise(total=sum(fixes))
+  
+noc_model <- left_join(noc_period, noc_total) %>%
+  mutate(percentage=(100/total)*fixes) %>%
+  mutate(mfws_habitat=factor(mfws_habitat, 
+                             levels=c("Eucalypt woodland", 
+                                      "Eucalypt forest", 
+                                      "Regrowth", "Grassland",
+                                      "Aquatic")))
+```
+
+### Habitat attributes
+
+We also quantified eastern quoll habitat use using the following LiDAR rasters:
+
+  1. [Overstory layer cover fraction (LCF_OS)](https://dapds00.nci.org.au/thredds/catalog/ub8/au/TERN/lidar/ACT/5m/LCF_OS/catalog.html), 
+  2. [Understory layer cover fraction (LCF_US)](https://dapds00.nci.org.au/thredds/catalog/ub8/au/TERN/lidar/ACT/5m/LCF_US/catalog.html), and
+  3. [Derived aspect (from DEM)](https://dapds00.nci.org.au/thredds/catalog/ub8/au/TERN/lidar/ACT/5m/DEM/catalog.html).
+  
+```{r}
+# Install and load required packages
+pacman::p_load(ggpubr, lme4, MuMIn, plotrix, raster, sf, viridis)
+
+# Read in raster data
+overstory <- raster("mfgo_overstory.tif")
+understory <- raster("mfgo_understory.tif")
+aspect <- raster("mfgo_aspect.tif")
+
+# Read in coordinates data
+noc <- read.csv("Data - coordinates curated.csv") %>%
+  mutate(easting=as.numeric(easting),
+         northing=as.numeric(northing))
+
+# Convert and project coordinates as spatial points using sp
+noc_sp <- SpatialPointsDataFrame( 
+    data.frame(noc$easting, noc$northing), noc,
+    proj4string=CRS("EPSG:32755")) %>% 
+  st_as_sf()
+
+# Extract raster values for each coordinate
+noc_lidar <- noc_sp %>%
+  mutate(overstory=raster::extract(overstory, noc_sp, method="simple"),
+         understory=raster::extract(understory, noc_sp, method="simple"), 
+         aspect=raster::extract(aspect, noc_sp, method="simple"),
+         date=as.POSIXct(date),
+         # Create day of the year (1-365) variable
+         day=as.numeric(yday(date))) %>%
+  na.omit() %>% 
+  st_drop_geometry()
+```
+
+To determine whether the overstory, understory, and aspect values for each individual's location is related to availability or preference, we need to compare them with the available values in Mulligans Flat.
+
+```{r}
+# Read in MFWS fence polygon using sf
+mf_fence <- st_read("shapefiles/mfws_fence.shp", quiet=TRUE) %>%
+  st_set_crs("EPSG:32755")
+
+# Extract available overstory in MFWS
+overstory_mf <- as.data.frame(rasterToPoints(mask(overstory, mf_fence))) %>%
+  mutate(type="Available", raster="Overstory", 
+         raster_units=Raster_._MFGO_overstory*100) %>%
+  dplyr::select(type, raster, raster_units)
+
+# Extract available understory in MFWS
+understory_mf <- as.data.frame(rasterToPoints(mask(understory, mf_fence))) %>%
+  mutate(type="Available", raster="Understory",
+         raster_units=Raster_._MFGO_understory*100) %>%
+  dplyr::select(type, raster, raster_units)
+
+# Extract available aspects in MFWS
+aspect_mf <- as.data.frame(rasterToPoints(mask(aspect, mf_fence))) %>%
+  mutate(type="Available", raster="Aspect",
+         raster_units=Raster_._MFGO_aspect) %>%
+  dplyr::select(type, raster, raster_units) 
+
+# Combine raster values into single df
+raster_mf <- rbind(overstory_mf, understory_mf, aspect_mf) %>%
+  dplyr::select(type, raster, raster_units)
+```
+
+### Models and summaries
+
+#### Habitat types
+
+Here we tested for habitat preference in nocturnal activity compared to a random distribution using the Chi-square test for given probabilities, using frequencies of locations in each habitat with the proportional area of each habitat available in MFWS.
+
+We found the distribution of eastern quoll locations in each habitat type varied significantly from random distribution (χ2 = 1455.8, df = 3, *p* < 2.2e-16).
+
+```{r}
+noc_use <- noc_plot %>%
+  dplyr::select(mfws_habitat, freq, area) %>%
+  mutate(observed=freq,
+         # Create proportion of MFWS minus aquatic habitat
+         proportion=area/sum(noc_plot$area), 
+         expected=proportion*sum(noc_plot$freq)) %>%
+  dplyr::select(-freq)
+
+plotdat <- gather(noc_use, type, value, observed, expected)
+
+# Plot MFWS habitat types
+chi_plot <- ggplot(plotdat, aes(mfws_habitat, value, fill=type)) +
+  geom_bar(stat="identity", position='dodge')
+chi_plot
+
+chisq.test(noc_use$observed, p=noc_use$proportion, correct=TRUE)
+```
+
+Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the percentage of fixes spent in woodland, forest, regrowth, or grassland aftering adjusting for habitat availability.
+
+We found no significant differences driven by `cohort`, `period`, or `morph` on the percentage of nocturnal fixes in each habitat type. After accounting for habitat availability, eastern quolls spent their nocturnal activity in grassland (61.47%), Eucalypt woodland (29.90%), regrowth (7.58%), and Eucalypt forest (1.05%).
+
+```{r, warning=FALSE}
+woodland <- subset(noc_model, mfws_habitat=="Eucalypt woodland")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=woodland))), digits=4)
+
+forest <- subset(noc_model, mfws_habitat=="Eucalypt forest")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=forest))), digits=4)
+
+regrowth <- subset(noc_model, mfws_habitat=="Regrowth")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=regrowth))), digits=4)
+
+grassland <- subset(noc_model, mfws_habitat=="Grassland")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=grassland))), digits=4)
+```
+
+#### **Habitat attributes**
+
+Next, we used GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the habitat attributes (i.e., `overstory`, `understory`, and `aspect`) of nocturnal locations.
+
+```{r}
+round(coef(summary(lmer(overstory ~ cohort*period + morph + 
+                          (1|name), data=noc_lidar))), digits=4)
+
+round(coef(summary(lmer(understory ~ cohort*period + morph + 
+                          (1|name), data=noc_lidar))), digits=4)
+
+round(coef(summary(lmer(aspect ~ cohort*period + morph + 
+                          (1|name), data=noc_lidar))), digits=4)
+```
+
+We found no significant differences in `overstory`, `understory`, and `aspect` values for nocturnal activity between `cohort`s, `period`s, and `morph`s (*p* > 0.05). 
+
+```{r}
+data.frame(Measure=c("Overstory (%):", 
+                     "Understory (%):", 
+                     "Aspect (degrees):"),
+           Mean=c(mean(noc_lidar$overstory)*100, 
+                  mean(noc_lidar$understory)*100,
+                  mean(noc_lidar$aspect)),
+           SE=c(std.error(noc_lidar$overstory)*100, 
+                std.error(noc_lidar$understory)*100,
+                std.error(noc_lidar$aspect)))
+```
+
+On average, eastern quolls were active in areas with an `overstory` of 12.65% (layer cover, ±0.27), `understory` of 2.23 (layer cover, ±0.06), and `aspect` of 202.98° (±1.27, i.e., south-southwest-facing).
+
+## Diurnal denning
+
+Similarly, we calculated the frequency of diurnal dens (VHF fixes) per habitat type, and adjusted the frequency for area of habitat available.
+
+### Habitat types
+
+```{r}
+# Read in coordinates data and prepare for plotting
+diu <- read_excel(raw_data, sheet="dens") %>% 
+  clean_names() %>% na.omit() %>%
+  mutate(easting=as.numeric(easting), 
+         northing=as.numeric(northing), 
+         date=as.POSIXct(date_tracked), 
+         day=as.numeric(yday(date)), #day of the year variable
+         night=(as.numeric(yday(date)) - 157), #night variable)
+         period=ifelse(night >=3 & night <=21, 'Baseline', 
+                ifelse(night >=22 & night <=32, 'Release',
+                ifelse(night >=33 & night <=52, 'Settlement', NA)))) %>%
+  # Remove irrelevant dates
+  subset(night >=3 & night <=52) %>% 
+  subset(ifelse(cohort=="Resident", night <=32, night >=22))
+
+diu_sp <- SpatialPointsDataFrame( #library(sp)
+  data.frame(diu$easting, diu$northing), diu,
+  proj4string=CRS("EPSG:32755")) %>% st_as_sf()
+
+nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp", quiet=TRUE) %>%
+  st_transform("EPSG:32755")
+
+diu_nvis <- st_join(diu_sp, nvis, join=st_intersects) %>%
+  rename(mfws_habitat=MFWS_NAME) %>% 
+  st_drop_geometry()
+
+diu_adj <- diu_nvis %>%
+  group_by(mfws_habitat) %>% count() %>% 
+  mutate(freq=n, perc=(freq/413)*100) #adjusted by frequency of dens
+
+diu_plot <- diu_adj %>% clean_names() %>%
+  left_join(mfws_group, by="mfws_habitat") %>%
+  mutate(freq_adj=freq/area, #adjusted by total area
+         perc_adj=(freq_adj/383.1) *100, #adjusted by total freq_adj
+         mfws_habitat=factor(mfws_habitat, 
+                             levels=c("Eucalypt woodland", 
+                                      "Eucalypt forest", 
+                                      "Regrowth", "Grassland",
+                                      "Aquatic")))
+#data for modelling
+diu_period <- diu_nvis %>%
+  group_by(cohort, period, morph, name, mfws_habitat) %>%
+  summarise(dens=length(mfws_habitat))
+
+diu_total <- diu_period %>%
+  group_by(cohort, period, morph, name) %>%
+  summarise(total=sum(dens))
+  
+diu_model <- left_join(diu_period, diu_total) %>%
+  mutate(percentage=(100/total)*dens, 
+         mfws_habitat=factor(mfws_habitat, 
+                             levels=c("Eucalypt woodland", 
+                                      "Eucalypt forest", 
+                                      "Regrowth", "Grassland",
+                                      "Aquatic")))
+```
+
+### Habitat attributes
+
+```{r}
+diu <- read_excel(raw_data, sheet="dens") %>% 
+  clean_names() %>% 
+  na.omit() %>%
+  mutate(easting = as.numeric(easting), 
+         northing = as.numeric(northing), 
+         date = as.POSIXct(date_tracked), 
+         # Day of the year variable
+         day = as.numeric(yday(date)),
+         # Night variable 
+         night = (as.numeric(yday(date)) - 157), 
+         period = ifelse(night >=3 & night <=21, 'Baseline', 
+                  ifelse(night >=22 & night <=32, 'Release', 
+                  ifelse(night >=33 & night <=52, 'Settlement', NA)))) %>%
+  # Remove irrelevant dates
+  subset(night >=3 & night <=52) %>% 
+  subset(ifelse(cohort=="Resident", night <=32, night >=22))
+
+diu_sp <- SpatialPointsDataFrame( 
+  data.frame(diu$easting, diu$northing), diu,
+  proj4string=CRS("EPSG:32755")) %>% 
+  st_as_sf()
+
+diu_lidar <- diu_sp %>%
+  mutate(overstory=raster::extract(overstory, diu_sp, method="simple"),
+         understory=raster::extract(understory, diu_sp, method="simple"), 
+         aspect=raster::extract(aspect, diu_sp, method="simple")) %>%
+  na.omit() %>% 
+  st_drop_geometry()
+```
+
+### Models and summaries
+
+Here we tested for habitat preference in diurnal denning compared to a random distribution using the Chi-square test for given probabilities, using frequencies of dens in each habitat with the proportional area of each habitat available in MFWS.
+
+We found the distribution of eastern quoll dens in each habitat type varied significantly from random distribution (χ2 = 45.629, df = 3, *p* < 6.8e-10).
+
+```{r}
+diu_use <- diu_plot %>%
+  dplyr::select(mfws_habitat, freq, area) %>%
+  mutate(observed=freq, 
+         proportion=area/sum(diu_plot$area), #area of MFWS minus aquatic habitat
+         expected=proportion*sum(diu_plot$freq)) %>%
+  dplyr::select(-freq)
+
+plotdat <- gather(diu_use, type, value, observed, expected)
+chi_plot <- ggplot(plotdat, aes(mfws_habitat, value, fill=type)) +
+  geom_bar(stat="identity", position='dodge')
+chi_plot
+
+chisq.test(diu_use$observed, p=diu_use$proportion, correct=TRUE)
+```
+
+Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the percentage of fixes spent in woodland, forest, regrowth, or grassland. We found no significant differences driven by `cohort`, `period`, or `morph` on the percentage of diurnal dens in each habitat type. 
+
+After accounting for habitat availability, eastern quolls denned preferring to den in grassland (37.45%), Eucalypt forest (29.14%), Eucalypt woodland (19.32%), and regrowth (14.11%).
+
+```{r, warning=FALSE}
+woodland <- subset(diu_model, mfws_habitat=="Eucalypt woodland")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=woodland))), digits=4)
+
+forest <- subset(diu_model, mfws_habitat=="Eucalypt forest")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=forest))), digits=4)
+
+regrowth <- subset(diu_model, mfws_habitat=="Regrowth")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=regrowth))), digits=4)
+
+grassland <- subset(diu_model, mfws_habitat=="Grassland")
+round(coef(summary(lmer(percentage ~ cohort*period + morph + 
+                          (1|name), data=grassland))), digits=4)
+```
+
+Next, we used GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the habitat attributes (i.e., `overstory`, `understory`, and `aspect`) of diurnal dens.
+
+```{r}
+round(coef(summary(lmer(overstory ~ cohort*period + morph + 
+                          (1|name), data=diu_lidar))), digits=4)
+
+round(coef(summary(lmer(understory ~ cohort*period + morph + 
+                          (1|name), data=diu_lidar))), digits=4)
+
+round(coef(summary(lmer(aspect ~ cohort*period + morph + 
+                          (1|name), data=diu_lidar))), digits=4)
+```
+
+We found no significant differences in `overstory`, `understory`, and `aspect` values for diurnal denning (VHF locations) between `cohort`s, `period`s, and `morph`s (*p* > 0.05). 
+
+```{r}
+data.frame(Measure=c("Overstory (%):", 
+                     "Understory (%):", 
+                     "Aspect (degrees):"),
+           Mean=c(mean(diu_lidar$overstory)*100, 
+                  mean(diu_lidar$understory)*100,
+                  mean(diu_lidar$aspect)),
+           SE=c(std.error(diu_lidar$overstory)*100, 
+                std.error(diu_lidar$understory)*100,
+                std.error(diu_lidar$aspect)))
+```
+
+On average, eastern quolls denned in areas with an overstory of 20.88% (layer cover, ±0.89), understory of 2.60 (layer cover, ±0.14), and aspect of 207.27° (±2.41, i.e., south-southwest-facing).
+
+## Comparison
+
+Here we combine the nocturnal activity and diurnal den locations into a single dataframe.
+
+```{r}
+noc_lidar_plot <- noc_lidar %>%
+  mutate('Overstory'=overstory*100, 'Understory'=understory*100, 
+         'Aspect'=aspect) %>%
+  gather(raster, raster_units, 
+         'Overstory':'Aspect', factor_key=TRUE) %>%
+  mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")), 
+         raster=factor(raster, levels=c("Overstory", "Understory", "Aspect")),
+         type="Nocturnal activity") %>%
+  dplyr::select(quoll, cohort, period, morph, 
+                day, raster, raster_units, type)
+
+diu_lidar_plot <- diu_lidar %>%
+  mutate('Overstory'=overstory*100,  'Understory'=understory*100, 
+         'Aspect'=aspect) %>%
+  gather(raster, raster_units, 
+         'Overstory':'Aspect', factor_key=TRUE) %>%
+  mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")), 
+         raster=factor(raster, levels=c("Overstory", "Understory", "Aspect")),
+         type="Diurnal denning") %>%
+  dplyr::select(quoll, cohort, period, morph, 
+                day, raster, raster_units, type)
+
+lidar_plot <- rbind(noc_lidar_plot, diu_lidar_plot) %>%
+  mutate(type=factor(type, levels=c("Nocturnal activity", 
+                                    "Diurnal denning"))) %>%
+  dplyr::select("type", "raster", "raster_units") %>%
+  rbind(raster_mf)
+```
+
+```{r}
+avai_lidar <- subset(lidar_plot, type=="Available")
+avai_os <- subset(avai_lidar, raster=="Overstory")
+avai_us <- subset(avai_lidar, raster=="Understory")
+avai_as <- subset(avai_lidar, raster=="Aspect")
+
+data.frame(Measure=c("Overstory (%):", "Understory (%):", 
+                     "Aspect (degrees):"),
+           Mean=c(mean(avai_os$raster_units), 
+                  mean(avai_us$raster_units),
+                  mean(avai_as$raster_units)),
+           SE=c(std.error(avai_os$raster_units), 
+                std.error(avai_us$raster_units),
+                std.error(avai_as$raster_units)))
+```
+
+Across the sanctuary, there was average overstory layer cover of 13.69% (±0.02), understory of 1.90% (±0.0.004), and aspect of 205.12° (±0.11, i.e., south-southwest-facing) available.
+
+### Models
+
+Here we tested for habitat preference in nocturnal activity compared to a random distribution using the Chi-square test for given probabilities, using frequencies of locations in each habitat with the proportional area of each habitat available in MFWS.
+
+When we compared these habitat attributes for **nocturnal locations** with **available values throughout the sanctuary**, we found these were significantly different for overstory (*p* < 0.0001) and understory layer cover (*p* < 0.0001), but not for aspect (*p* = 0.13).
+
+When we compared these habitat attributes for **diurnal dens** with **available values throughout the sanctuary**, we found these were significantly different for overstory (*p* < 0.0001) and understory layer cover (*p* < 0.008), but not for aspect (*p* = 0.28). 
+
+when we compared these attributes between **nocturnal locations** and **diurnal dens**, we found these were significantly different for overstory (*p* < 0.0001) and understory layer cover (*p* < 0.02), but not for aspect (*p* = 0.22).
+
+```{r}
+lidar_os <- subset(lidar_plot, raster=="Overstory")
+lidar_us <- subset(lidar_plot, raster=="Understory")
+lidar_as <- subset(lidar_plot, raster=="Aspect")
+
+round(coef(summary(glm(raster_units ~ type, 
+                       data=lidar_os))), digits=5)
+round(coef(summary(glm(raster_units ~ type, 
+                       data=lidar_us))), digits=5)
+round(coef(summary(glm(raster_units ~ type, 
+                       data=lidar_as))), digits=5)
+```
+
+### Plots
+
+#### Habitat types
+
+Finally, we plot frequency of fixes (with percentages) adjusted for habitat availability (area).
+
+```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=3}
+noc_nvis_plot <- ggplot(noc_plot, aes(x=mfws_habitat, y=freq_adj,
+                                  fill=mfws_habitat), col="grey15") + 
+  geom_col(size=0.5, col="grey15", alpha=0.8) +
+  geom_text(aes(label = paste0(round(perc_adj, digits=1), "%"), vjust=-0.5)) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "none",
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_text(vjust=1, hjust=0.5), 
+        axis.line.x = element_line(colour="black"),
+        axis.line.y = element_line(colour="black")) +
+  scale_fill_manual(values=viridis(4, begin=0.9, end=0.1)) +
+  scale_x_discrete(labels=wrap_format(3)) +
+  ggtitle("Nocturnal activity") + xlab("") + 
+  ylab(expression(paste("Adjusted frequency (per ", km^2, ")"))) +
+  annotate(geom="text", x=1, y=1500, label="a", fontface="bold", size=6)
+
+diu_nvis_plot <- ggplot(diu_plot, aes(x=mfws_habitat, y=freq_adj,
+                                  fill=mfws_habitat), col="grey15") + 
+  geom_col(size=0.5, col="grey15", alpha=0.8) +
+  geom_text(aes(label = paste0(round(perc_adj, digits=1), "%"), vjust=-0.5)) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "none",
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_text(vjust=1, hjust=0.5), 
+        axis.line.x = element_line(colour="black"),
+        axis.line.y = element_line(colour="black")) +
+  scale_fill_manual(values=viridis(4, begin=0.9, end=0.1)) +
+  scale_x_discrete(labels=wrap_format(3)) +
+  ggtitle("Diurnal denning") + xlab("") + ylab("") +
+  annotate(geom="text", x=1, y=150, label="b", fontface="bold", size=6)
+
+nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot, 
+                       ncol=2, nrow=1, widths=c(3,3))
+             annotate_figure(nvis_plot, 
+             bottom=textGrob("MFWS habitat", gp=gpar(cex=1)))
+```
+
+```{r, include=FALSE}
+jpeg(file="Fig - nvis habitat frequency.jpeg", 
+     width=3500, height=1750, units="px", res=500)
+print(nvis_plot)
+annotate_figure(nvis_plot, bottom=textGrob("MFWS habitat", gp=gpar(cex=1)))
+dev.off()
+```
+
+#### Habitat attributes
+
+```{r, fig.align="center", fig.width=9, fig.height=3}
+lidar_os <- subset(lidar_plot, raster=="Overstory")
+lidar_us <- subset(lidar_plot, raster=="Understory")
+lidar_as <- subset(lidar_plot, raster=="Aspect")
+
+lidar_os_plot <- ggplot(data=lidar_os, aes(x=type, y=raster_units)) +
+  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        strip.background = element_rect(colour="black", fill="grey15"), 
+        strip.text = element_text(colour="white")) +
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
+  xlab("") + ylab("Overstory layer cover (%)") +
+  annotate(geom="text", x=2, y=70, label="a", fontface="bold", size=6)
+
+lidar_us_plot <- ggplot(data=lidar_us, 
+                         aes(x=type, y=raster_units)) +
+  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        strip.background = element_rect(colour="black", fill="grey15"), 
+        strip.text = element_text(colour="white")) +
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
+  xlab("") + ylab("Understory layer cover (%)") +
+  annotate(geom="text", x=2, y=30, label="b", fontface="bold", size=6)
+
+lidar_as_plot <- ggplot(data=lidar_as, aes(x=type, y=raster_units)) +
+  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        strip.background = element_rect(colour="black", fill="grey15"), 
+        strip.text = element_text(colour="white")) +
+  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("") + ylab("Aspect (degrees)") +
+  annotate(geom="text", x=2, y=80, label="c", fontface="bold", size=6)
+
+lidar_plot <- ggarrange(lidar_os_plot, lidar_us_plot, lidar_as_plot,
+                        ncol=3, nrow=1, widths=c(2,2,2), label.x=0.89, 
+                        label.y=0.99, hjust=-0.1, vjust=1.5,
+                        font.label=list(size=10, face="bold", color="black"))
+print(lidar_plot)
+```
+
+```{r, include=FALSE}
+jpeg(file="Fig - lidar habitat use.jpeg", 
+     width=4500, height=1500, units="px", res=500)
+print(lidar_plot)
+dev.off()
+```
+
+# **Conspecific associations**
+
+## Correlation coefficients
+
+To quantify conspecific associations, we used the [wildlifeDI package](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1) to calculate:
+
+  - [Proximity index](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Prox), the proportion of (simultaneous) fixes that are proximal, based on a distance threshold (Bertrand *et al.* 1996) using the `Prox()` function, 
+  - [Movement correlation coefficient](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Cr), a Pearson product-moment correlation statistic (Shirabe 2006) using the `Cr()` function,
+  - [Coefficient of sociality](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Cs) between two moving objects (Kenward *et al.* 1993) using a signed significance Wilcoxon-rank test with the `Cs()` function.
+  - [Coefficient of association](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Ca), the dynamic interaction between two moving objects testing  the number of fixes the animals are observed together against the total number of fixes where `Ca > 0.5` indicates affiliation or fidelity, while `Ca < 0.5` indicates no association between the two animals(Cole 1949, Bauman 1998).
+  
+### Data curation
+
+  1. Study period
+
+```{r, eval=FALSE}
+data <- read.csv("Data - coordinates curated.csv") %>% 
+  mutate(date_time_12hr=as.POSIXct(strptime(date_time_12hr, 
+                                            format="%Y-%m-%d %H:%M",
+                                            tz="Australia/Sydney")))
+
+data_ltraj <- as.ltraj(xy=data[,c("easting", "northing")], 
+                       date=data$date_time_12hr, id=data$name, 
+                       proj4string=CRS("EPSG:32755")) #plot(data_ltraj)
+
+list <- data.frame((rep(c(1:15), each=15)), #change to unique(data$name)
+                   (rep(c(1:15), times=15))) %>%
+  rename(C1=1, C2=2) %>%
+  subset(as.character(C1) != as.character(C2))
+
+list1 <- list[,1]
+list2 <- list[,2]
+interact <- data.frame()
+
+for (i in 1:length(list1)){
+  
+  try(prox <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  try(cr <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(cs <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(ca <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  out_cr <- left_join(prox, cr, by=c("quoll1", "quoll2"))
+  out_cs <- left_join(out_cr, cs, by=c("quoll1", "quoll2"))
+  out_ca <- left_join(out_cs, ca, by=c("quoll1", "quoll2"))
+  print(out_ca[,1:3])
+  interact <- rbind(interact, out_ca)
+}
+
+interact_study <- interact %>% #remove any duplicate pairs
+  distinct(quoll1, quoll2, .keep_all=TRUE) %>%
+  mutate(period=c("Study"), .after=quoll2)
+```
+
+  2. Baseline period
+
+```{r, eval=FALSE}
+baseline <- data %>% 
+  filter(period=="Baseline") %>% 
+  droplevels()
+
+data_ltraj <- as.ltraj(xy=baseline[,c("easting", "northing")], 
+                       date=baseline$date_time_12hr, id=baseline$name, 
+                       proj4string=CRS("EPSG:32755")) #plot(data_ltraj)
+
+list <- data.frame((rep(c(1:7), each=7)), #change to unique(data$name)
+                   (rep(c(1:7), times=7))) %>%
+  rename(C1=1, C2=2) %>%
+  subset(as.character(C1) != as.character(C2))
+
+list1 <- list[,1]
+list2 <- list[,2]
+interact <- data.frame()
+
+for (i in 1:length(list1)){
+  
+  try(prox <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  try(cr <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(cs <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(ca <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  out_cr <- left_join(prox, cr, by=c("quoll1", "quoll2"))
+  out_cs <- left_join(out_cr, cs, by=c("quoll1", "quoll2"))
+  out_ca <- left_join(out_cs, ca, by=c("quoll1", "quoll2"))
+  print(out_ca[,1:3])
+  interact <- rbind(interact, out_ca) 
+}
+
+interact_baseline <- interact %>% #remove any duplicate pairs
+  distinct(quoll1, quoll2, .keep_all=TRUE) %>%
+  mutate(period=c("Baseline"), .after=quoll2)
+```
+
+  3. Release period
+
+```{r, eval=FALSE}
+release <- data %>% 
+  filter(period=="Release") %>% 
+  droplevels()
+
+data_ltraj <- as.ltraj(xy=release[,c("easting", "northing")], 
+                       date=release$date_time_12hr, id=release$name, 
+                       proj4string=CRS("EPSG:32755")) #plot(data_ltraj)
+
+list <- data.frame((rep(c(1:14), each=14)), #change to unique(data$name)
+                   (rep(c(1:14), times=14))) %>%
+  rename(C1=1, C2=2) %>%
+  subset(as.character(C1) != as.character(C2))
+
+list1 <- list[,1]
+list2 <- list[,2]
+interact <- data.frame()
+
+for (i in 1:length(list1)){
+  
+  try(prox <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  try(cr <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(cs <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(ca <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  out_cr <- left_join(prox, cr, by=c("quoll1", "quoll2"))
+  out_cs <- left_join(out_cr, cs, by=c("quoll1", "quoll2"))
+  out_ca <- left_join(out_cs, ca, by=c("quoll1", "quoll2"))
+  print(out_ca[,1:3])
+  interact <- rbind(interact, out_ca) 
+}
+
+interact_release <- interact %>% #remove any duplicate pairs
+  distinct(quoll1, quoll2, .keep_all=TRUE) %>%
+  mutate(period=c("Release"), .after=quoll2)
+```
+
+  4. Settlement period
+
+```{r, eval=FALSE}
+settlement <- data %>% 
+  filter(period=="Settlement") %>% 
+  droplevels()
+
+data_ltraj <- as.ltraj(xy=settlement[,c("easting", "northing")], 
+                       date=settlement$date_time_12hr, id=settlement$name, 
+                       proj4string=CRS("EPSG:32755")) #plot(data_ltraj)
+
+list <- data.frame((rep(c(1:10), each=10)), #change to unique(data$name)
+                   (rep(c(1:10), times=10))) %>%
+  rename(C1=1, C2=2) %>%
+  subset(as.character(C1) != as.character(C2))
+
+list1 <- list[,1]
+list2 <- list[,2]
+interact <- data.frame()
+
+for (i in 1:length(list1)){
+  
+  try(prox <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  try(cr <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(cs <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    silent=TRUE)
+  
+  try(ca <- data.frame(
+    quoll1=attr(data_ltraj[[list1[i]]], "id"),
+    quoll2=attr(data_ltraj[[list2[i]]], "id"),
+    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    silent=TRUE)
+  
+  out_cr <- left_join(prox, cr, by=c("quoll1", "quoll2"))
+  out_cs <- left_join(out_cr, cs, by=c("quoll1", "quoll2"))
+  out_ca <- left_join(out_cs, ca, by=c("quoll1", "quoll2"))
+  print(out_ca[,1:3])
+  interact <- rbind(interact, out_ca) 
+}
+
+interact_settlement <- interact %>% #remove any duplicate pairs
+  distinct(quoll1, quoll2, .keep_all=TRUE) %>%
+  mutate(period=c("Settlement"), .after=quoll2)
+
+interact <- rbind(interact_baseline, interact_release,
+                  interact_settlement, interact_study)
+
+write.csv(interact, "Data - interaction coefficients.csv")
+```
+
+The `interact` dataframe now contains several dynamic interaction coefficients for each combination of quolls for each study period. 
+
+Now we add `cohort` and `morph` back into the dataframe using a `lookup `table, and averaged each of the coefficients per individual per `period` for our summary statistics.
+
+```{r}
+interact <- read.csv("Data - interaction coefficients.csv") %>%
+  mutate(name=quoll1) %>%
+  na.omit() %>%
+  merge(lookup, by=c("name", "period")) %>%
+  mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")),
+         morph=factor(morph, levels=c("Fawn","Dark"))) %>%
+  subset(period!="Study")
+```
+
+### Models and summaries
+
+Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the correlation coefficients. We did not include individual (`name`) as a random effect because there was a single `morph` for each.
+
+```{r, warning=FALSE}
+# Generate proximity index (prox)
+round(coef(summary(glm(prox ~ cohort*period + morph, 
+                       data=interact))), digits=4)
+
+# Generate pearson correlation index (cr)
+round(coef(summary(glm(cr ~ cohort*period + morph, 
+                       data=interact))), digits=4)
+
+# Generate coefficient of sociality (cs)
+round(coef(summary(glm(cs.Cs ~ cohort*period + morph, 
+                       data=interact))), digits=4)
+
+# Generate coefficient of association (ca)
+round(coef(summary(glm(ca ~ cohort*period + morph, 
+                       data=interact))), digits=4)
+```
+
+```{r}
+# Pearson and period
+interact %>% group_by(period) %>%
+  summarise(cr_mean=mean(cr), cr_se=std.error(cr)) 
+
+# Pearson and morph
+interact %>% group_by(morph) %>%
+  summarise(cr_mean=mean(cr), cr_se=std.error(cr)) 
+```
+
+On average, Pearson coefficients were significantly lower during the settlement periods (-0.106 ±0.0290 SE) than the baseline period (0.00110 ±0.0207 SE) and the release periods (-0.0188 ±0.0243 SE, *p* < 0.00809), and were significantly higher for dark morphs (0.0258 ±0.0268 SE) than for fawn morphs (-0.0764 ±0.0204 SE, *p* < 0.00152).
+
+## Den sharing
+
+### Models and summaries
+
+```{r}
+coden <- read_excel(raw_data, sheet="dens") %>% 
+  clean_names() %>% na.omit() %>%
+  mutate(easting = as.numeric(easting), 
+         northing = as.numeric(northing), 
+         date = as.POSIXct(date_tracked), 
+         # Day of the year variable
+         day = as.numeric(yday(date)), 
+         # Night variable 
+         night = (as.numeric(yday(date)) - 157), 
+         period = ifelse(night >=3 & night <=21, 'Baseline', 
+                  ifelse(night >=22 & night <=32, 'Release',
+                  ifelse(night >=33 & night <=52, 'Settlement', NA)))) %>%
+  # Remove irrelevant dates
+  subset(night >=3 & night <=52) %>% 
+  subset(ifelse(cohort=="Resident", night <=32, night >=22)) %>%
+  dplyr::select(name, morph, cohort, period, coden, eqd_code) %>%
+  mutate(bin = ifelse(coden=="Alone",0,1)) %>%
+  rename(den = eqd_code)
+
+# Calculate frequency of den use
+dens <- coden %>%
+  group_by(den) %>%
+  summarise(frequency=n()) %>%
+  group_by(frequency) %>%
+  summarise(dens=n())
+```
+
+Of the 51 unique den sites, we found that 13 dens were used once, 28 were used on 2-9 occasions, 9 were used on 10-39 occasions, and one den was used on 96 occasions. For three days in a row, this den was rested in by 5 collared eastern quolls at once. 
+
+Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the probability of den sharing. We did not include individual (`name`) as a random effect because there was a single `morph` for each.
+
+```{r, warning=FALSE}
+round(coef(summary(glm(bin ~ cohort + period + morph, data=coden, 
+                       family=binomial(link="logit")))), digits=4)
+
+sharing <- coden %>%
+  group_by(name, cohort, period, morph, coden) %>%
+  summarise(frequency=n())
+
+sharing %>%
+  group_by(cohort, coden) %>%
+  summarise(frequency=sum(frequency))
+
+sharing %>%
+  group_by(period, coden) %>%
+  summarise(frequency=sum(frequency))
+
+sharing_plot <- sharing %>%
+  spread(coden, frequency) %>%
+  mutate(probability=(`Den shared`/sum(`Den shared`, Alone))) %>%
+  mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
+```
+
+We found residents were significantly more likely to share their diurnal dens with other collared eastern quolls (*p* < 0.0001), spending 49.11% their days den sharing compared to 26.46% for reinforcers. 
+
+Two collared eastern quolls den shared only once (both reinforcers), six (five of which were reinforcers) den shared on 2-6 occasions, and six (four of which were residents) den shared on 11-20 occasions, and two den shared on 22 occasions each (both residents). 
+
+Den sharing was also significantly less likely to occur during the release and settlement periods (*p* < 0.0013), occurring on 31.43% and 35.43% of days respectively, compared to 48.63% of days during the baseline period. 
+
+## Plots
+
+Finally, we plot these significant results.
+
+```{r, fig.align="center", fig.width=6, fig.height=3}
+pear_period_plot <- ggplot(data=interact, aes(x=period, y=as.numeric(cr))) +
+  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        strip.background = element_rect(colour="black", fill="grey15"), 
+        strip.text = element_text(colour="white")) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("Study period") + ylab("Pearson correlation coefficient") +
+  annotate(geom="text", x=3, y=1, label="a", fontface="bold", size=6)
+
+pear_morph_plot <- ggplot(data=interact, aes(x=morph, y=as.numeric(cr))) +
+  geom_boxplot(aes(fill=morph), col="grey15", alpha=0.8) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        strip.background = element_rect(colour="black", fill="grey15"), 
+        strip.text = element_text(colour="white")) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("Morph") + ylab("") +
+  annotate(geom="text", x=1, y=0.8, label="b", fontface="bold", size=6)
+
+coden_plot <- ggplot(data=sharing_plot, 
+                      aes(x=cohort, y=as.numeric(probability))) +
+  geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none") +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("Cohort") + ylab("Probability of den sharing") +
+  annotate(geom="text", x=2, y=1, label="c", fontface="bold", size=6)  
+
+interact_plot <- ggarrange(pear_period_plot, pear_morph_plot, coden_plot,
+                           ncol=3, nrow=1, label.x=0.89, widths=c(2.25,2,2),
+                           label.y=0.99, hjust=-0.1, vjust=1.5, 
+                           font.label=list(size=10, face="bold", 
+                                           color="black"))
+print(interact_plot)
+```
+
+```{r, include=FALSE}
+jpeg(file="Fig - interaction per fixed effects.jpeg", 
+     width=4500, height=1500, units="px", res=500)
+print(interact_plot)
+dev.off()
+```
+
+# ⚠️**Animation**
+
+By following a [gganimate tutorial by Katherine Goode](https://goodekat.github.io/presentations/2019-isugg-gganimate-spooky/slides.html?fbclid=IwAR0xBuMZO0ZCKjx2SF6hTPL5lv8JMfALIlmwopA_QmqGddCuN6jab3msWsY#1), we created an animation showing the movement of the eastern quolls over the study period.
+
+```{r, eval=FALSE}
+pacman::p_load(gganimate, ggplot2, tidyverse, transformr)
+
+quoll_animation <- read.csv("1c coordinates curated.csv") %>%
+  mutate(name=factor(name)) %>%
+  #mutate(image=bat_image_link) %>%
+  ggplot(aes(x=longitude, y=latitude, color=aest, group=name)) +
+    geom_point() + 
+    geom_path() + time
+    #geom_image(aes(image=image), size=0.3) +
+    scale_color_gradient2(midpoint=6, low="orange", 
+                          mid="purple", high="black") +
+    #scale_color_manual(values=c("darkorange", "orangered", 
+                                #"violetred", "purple", "black")) +
+    transition_states(states=name, state_length=3, transition_length=3) +
+    #transition_time(time=aest, range=c(1, 3)) +
+    #transition_reveal(along=aest) + #also (aest)
+    #view_follow() + #(fixed_y=TRUE)
+    #view_step(pause_length=3, step_length=1, nsteps=5) +
+    #shadow_wake(wake_length=0.1, alpha=0.5) +
+    #shadow_wake(wake_length=0.2, size=5, alpha=FALSE, colour='grey92') +
+    #shadow_mark(alpha=0.3, size=0.5) #leaves a mark behind
+    shadow_trail(distance=0.01, alpha=0.5, shape=2) +
+    labs(title="Eastern quoll {previous_state}") #"Night: {frame_time}
+  
+animate(quoll_animation) #nframes=300
+anim_save(quoll_animation, "Ani - Quoll animation.gif")
+```
+
+# **Session info**
+
+```{r}
+# Display version information for R, OS, and packages
+sessionInfo()
+```
