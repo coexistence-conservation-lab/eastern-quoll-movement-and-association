@@ -13,7 +13,7 @@ output:
     highlight: pygments
 editor_options: 
   chunk_output_type: console
-  
+
 knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(dirname(inputFile), 'tutorial.html')) })
 ---
 ```{r setup, include=FALSE}
