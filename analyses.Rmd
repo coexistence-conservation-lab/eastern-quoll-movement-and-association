@@ -1,7 +1,7 @@
 ---
 title: "Everybody needs good neighbours: movement and conspecific association in a reintroduced mesopredator"
 author: "Wilson B A, Evans M J, Rapley S, Gordon I J, Wimpenny C, Newport J, & Manning A D"
-date: "1 August 2023"
+date: "30 September 2023"
 output:
   html_document:
     toc: true
@@ -39,10 +39,11 @@ First, we installed the [pacman Package Management Tool](https://cran.r-project.
 
 ```{r}
 # Install and load required packages
-pacman::p_load(adehabitatLT, corrplot, data.table, dplyr, ggplot2, ggpmisc, 
-               ggpubr, grid, gridExtra, gtools, janitor, lme4, lubridate, 
-               MuMIn, plotrix, rstudioapi, raster, readxl, rgdal, RODBC, 
-               scales, sf, sp, tidyr, tidyverse, viridis, wildlifeDI)
+pacman::p_load(adehabitatHR, adehabitatLT, corrplot, data.table, dplyr,
+               ggplot2, ggpmisc, ggpubr, ggspatial, grid, gridExtra, gtools, janitor,
+               lme4, lubridate, MuMIn, plotrix, rstudioapi, raster, readxl,
+               rgdal, RODBC, scales, sf, sp, tidyr, tidyverse, viridis,
+               wildlifeDI)
 ```
 
 We also set the working directly to where this R markdown is saved using the `rstudioapi` package.
@@ -196,7 +197,7 @@ Note that while `Altitude` also had a significant effect, this is because the ar
 
 ```{r}
 # Print model summary statistics for inside/outside fix predictors
-round(coef(summary(glm(fence ~ duration + temperature + 
+round(coef(summary(glm(fence ~ duration + temp + 
                        dop + satellites, 
                        family=binomial(link=logit), 
                     data=coords_annotated))), digits=4)
@@ -212,16 +213,16 @@ duration <- ggplot() +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) + 
-  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Duration (seconds)")
 
 temperature <- ggplot() + 
-  geom_boxplot(coords_annotated, mapping=aes(x=fence, y=temperature, fill=fence), 
+  geom_boxplot(coords_annotated, mapping=aes(x=fence, y=temp, fill=fence), 
                col="grey15", alpha=0.8) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) +
-  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Temperature (Celsius)")
 
 hdop <- ggplot() + 
@@ -230,7 +231,7 @@ hdop <- ggplot() +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) +
-  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Horizontal dilution \nof precision")
 
 satellites <- ggplot() + 
@@ -239,7 +240,7 @@ satellites <- ggplot() +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) +
-  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Number of satellites")
 
 covariates <- ggarrange(duration, temperature, hdop, satellites, 
@@ -250,7 +251,7 @@ covariates
 ```
 
 ```{r, include=FALSE}
-ggsave(filename="Fig - data curation boxplots.jpeg", 
+ggsave(filename="figures/data curation boxplots.jpeg", 
        covariates, width=200, height=100, units="mm")
 ```
 
@@ -271,7 +272,7 @@ coords_s <- subset(coords_h, satellites>=5)
 coords_f <- subset(coords_s, fence=="Inside") %>%
     mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
 
-write.csv(coords_f, "Data - coordinates curated.csv")
+write.csv(coords_f, "processed data/coordinates curated.csv")
 ```
 
 Below is a tabulated summary of the fixes removed by each variable's threshold.
@@ -323,7 +324,7 @@ We calculated the linear `distance` (metres) between consecutive locations divid
 ## **Data curation**
 
 ```{r}
-data <- read.csv("Data - coordinates curated.csv")
+data <- read.csv("processed data/coordinates curated.csv")
 quolls <- unique(sort(data$name)) #vector of identities
 distance_fix <- data.frame()
 
@@ -375,8 +376,6 @@ enviro <- read_excel(raw_data, sheet="environment") %>%
 
 model_data <- as.data.frame(left_join(data, enviro, by="date_12hr"))
 ```
-
-<br />
 
 ## **Models**
 
@@ -430,7 +429,7 @@ dist_plot
 ```
 
 ```{r, include=FALSE}
-jpeg(file="Fig - distance across individuals.jpeg", 
+jpeg(file="figures/distance across individuals.jpeg", 
      width=2000, height=1500, units="px", res=500)
 dist_plot
 dev.off()
@@ -445,7 +444,7 @@ We used the kernel utilisation distribution (KUD) model to calculate `home` rang
 ### Range per night
 
 ```{r}
-data <- read.csv("Data - coordinates curated.csv") %>%
+data <- read.csv("processed data/coordinates curated.csv") %>%
   mutate(night_date=as.POSIXct(strptime(date_time_12hr, 
                                         format="%Y-%m-%d")))
 coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
@@ -462,7 +461,7 @@ for (i in 1:length(quolls)) {
     points <- subset(coords, name==quolls[i] & date==days[j], select=name)
     if (nrow(points)<5) 
       {next}
-    kud <- kernelUD(points, h="href", grid=500, extent=8)
+    kud <- adehabitatHR::kernelUD(points, h="href", grid=500, extent=8)
     home_range <- getverticeshr(kud, percent=95) #in hectares
     core_range <- getverticeshr(kud, percent=50) #in hectares
     out <- as.data.frame(x=cbind(home_range[["area"]], 
@@ -471,11 +470,11 @@ for (i in 1:length(quolls)) {
       rename(home_range=V1, core_range=V2, name=V3, night_date=V4)
     print(out)
     ranges <- rbind.data.frame(ranges, out) }}
-write.csv(ranges, "Data - raw ranges per day.csv")
+write.csv(ranges, "processed data/raw ranges per day.csv")
 ```
 
 ```{r}
-ranges_day <- read.csv("Data - raw ranges per day.csv") %>% #format time
+ranges_day <- read.csv("processed data/raw ranges per day.csv") %>% #format time
   mutate(night_date=as.POSIXct(strptime(night_date, format="%Y-%m-%d",
                                         tz="Australia/Sydney")))
 
@@ -487,10 +486,10 @@ ranges_data <- data %>% #add day and night numbers
   dplyr::select(-n)
 
 #lookup table to add cohort and morph back in
-periods <- read.csv("Data - coordinates curated.csv") %>%
+periods <- read.csv("processed data/coordinates curated.csv") %>%
   group_by(cohort, period, morph, name) %>%
   summarise(fixes=length(name))
-study <- read.csv("Data - coordinates curated.csv") %>%
+study <- read.csv("processed data/coordinates curated.csv") %>%
   group_by(cohort, morph, name) %>%
   summarise(fixes=length(name)) %>%
   mutate(period="Study")
@@ -501,13 +500,13 @@ ranges_data <- ranges_data %>% #add study period
                 ifelse(night_12hr >=20 & night_12hr <=28, 'Release',
                 ifelse(night_12hr >=29, 'Settlement', NA)))) %>% 
   merge(lookup, by=c("name","period")) #add cohort and morph
-write.csv(ranges_data,"Data - ranges per day.csv")
+write.csv(ranges_data,"processed data/ranges per day.csv")
 ```
 
 ### Range per individual
 
 ```{r}
-data <- read.csv("Data - coordinates curated.csv")
+data <- read.csv("processed data/coordinates curated.csv")
 coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
                                  data$northing)), data=data)
 kud <- kernelUD(coords[,6], h="href", grid=500)
@@ -529,7 +528,7 @@ ranges_study <- data.frame(left_join(st_drop_geometry(home_range), #extract area
 ### Range per period
 
 ```{r, eval=FALSE}
-data <- read.csv("Data - coordinates curated.csv") %>%
+data <- read.csv("processed data/coordinates curated.csv") %>%
   mutate(period=as.character(period))
 coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
                                  data$northing)), data=data)
@@ -613,7 +612,7 @@ ranges_period <- data.frame(left_join(st_drop_geometry(hr), #extract areas
 
 ranges <- rbind(ranges_period, ranges_study) %>%
   merge(lookup, by=c("name","period"))
-write.csv(ranges, "Data - ranges per period.csv")
+write.csv(ranges, "processed data/ranges per period.csv")
 ```
 
 ### Models and summaries
@@ -621,7 +620,7 @@ write.csv(ranges, "Data - ranges per period.csv")
 Next we use a GLMs to test the fixed effects of `cohort`, `period`, and `morph` on the home and core ranges of each quoll.
 
 ```{r}
-ranges_model <- read.csv("Data - ranges per period.csv") %>% 
+ranges_model <- read.csv("processed data/ranges per period.csv") %>% 
   subset(period!="Study") %>%
   mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
 
@@ -637,7 +636,7 @@ We found there were significant differences between `cohort`s for `home_range` (
 We also ran a linear model to assess whether daily home and core ranges changed over time, we found the most parsimonious model included both cohort (home range p < 0.0002, core range p < 0.0001) and study night (home range p < 0.01, core range p < 0.0074).
 
 ```{r}
-ranges_data <- read.csv("Data - ranges per day.csv") %>%
+ranges_data <- read.csv("processed data/ranges per day.csv") %>%
     mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
 
 round(coef(summary(glm(home_range ~ night_12hr + cohort + morph, 
@@ -682,10 +681,54 @@ On average, resident home ranges were 89.89 ha (±11.46) and core ranges were 19
 
 We also calculated the area of home and core range overlap (or static interaction) between dyads (pairs) of individuals using `st_intersection`.
 
+#### Home range map
+
+```{r}
+lookup_distinct <- as.data.frame(lookup) %>% 
+  dplyr::select(-period, -fixes) %>%
+  distinct(id=name, cohort, morph) 
+
+hr_lookup <- home_range %>% 
+  merge(lookup_distinct, by=c("id")) %>%
+  mutate(cohort=ifelse(cohort=="Resident", "Residents", "Reinforcers")) %>%
+  mutate(cohort=factor(cohort,
+                       levels=c("Residents","Reinforcers")))
+
+# Map
+hr_map <- ggplot(hr_lookup) + 
+  geom_path(mfws, mapping=aes(x=long, y=lat), col="grey15") +
+  geom_sf(aes(fill=id, col=id), alpha=0.2) + 
+  coord_sf(xlim=c(695750, 699505), ylim=c(6104500, 6107675)) +
+  annotation_scale(style="ticks", tick_height=0.5,
+                   width_hint=0.3, pad_x=unit(4.2, "cm"),
+                   pad_y=unit(0.2, "cm")) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_rect(fill="white"),
+        legend.position="none", 
+        axis.text.x = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.margin = unit(c(0, 0.2, 0, 0), "cm"),
+        strip.background=element_rect(colour="black",
+                                      fill="grey15"), 
+        strip.text=element_text(colour="white")) +
+  scale_fill_viridis(discrete=T, option="D", begin=1, end=0) +
+  scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +   facet_wrap(~cohort) +
+  xlab("") + ylab("")
+print(hr_map)
+```
+
+```{r, include=FALSE}
+jpeg(file="figures/home range map by cohort.jpeg", 
+     width=3000, height=1500, units="px", res=500)
+hr_map
+dev.off()
+```
+
 ```{r, eval=FALSE, results='hide'}
-#home range
-ggplot(home_range) + 
-  geom_sf(aes(fill=id), alpha=0.2)
 list <- unique(home_range$id)
 out <- data.frame()
 
@@ -700,9 +743,91 @@ home_overlap <- out %>%
   mutate(area_int=as.numeric(st_area(.))*0.0001) %>%
   rename(name=id, name2=id.1, overlap=area_int) %>%
   dplyr::select(-area, -area.1)
+```
 
-#core range
-ggplot(core_range) + geom_sf(aes(fill=id), alpha=0.2)
+#### Map
+
+```{r}
+cr_lookup <- core_range %>% 
+  merge(lookup_distinct, by=c("id")) %>%
+  mutate(cohort=ifelse(cohort=="Resident", "Residents", "Reinforcers")) %>%
+  mutate(cohort=factor(cohort,
+                       levels=c("Residents","Reinforcers")))
+
+# Map
+cr_map <- ggplot(cr_lookup) + 
+  geom_path(mfws, mapping=aes(x=long, y=lat), col="grey15") +
+  geom_sf(aes(fill=id, col=id), alpha=0.2) + 
+  coord_sf(xlim=c(695750, 699505), ylim=c(6104500, 6107675)) +
+  annotation_scale(style="ticks", tick_height=0.5,
+                   width_hint=0.3, pad_x=unit(4.2, "cm"),
+                   pad_y=unit(0.2, "cm")) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_rect(fill="white"),
+        legend.position="none", 
+        axis.text.x = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        strip.background=element_rect(colour="black",
+                                      fill="grey15"), 
+        strip.text=element_text(colour="white")) +
+  scale_fill_viridis(discrete=T, option="D", begin=1, end=0) +
+  scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +   facet_wrap(~cohort) +
+  xlab("") + ylab("")
+print(cr_map)
+```
+
+```{r, include=FALSE}
+jpeg(file="figures/core range map by cohort.jpeg", 
+     width=3000, height=1500, units="px", res=500)
+cr_map
+dev.off()
+```
+
+Generate version of map where core ranges has no facet strip.
+
+```{r}
+# Map
+cr_map <- ggplot(cr_lookup) + 
+  geom_path(mfws, mapping=aes(x=long, y=lat), col="grey15") +
+  geom_sf(aes(fill=id, col=id), alpha=0.2) + 
+  coord_sf(xlim=c(695750, 699505), ylim=c(6104500, 6107675)) +
+  annotation_scale(style="ticks", tick_height=0.5,
+                   width_hint=0.3, pad_x=unit(4.2, "cm"),
+                   pad_y=unit(0.2, "cm")) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_rect(fill="white"),
+        legend.position="none", 
+        axis.text.x = element_blank(), 
+        axis.text.y = element_blank(), 
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.margin = unit(c(0, 0.2, 0, 0), "cm"),
+        strip.background = element_blank(),
+        strip.text.x = element_blank()) +
+  scale_fill_viridis(discrete=T, option="D", begin=1, end=0) +
+  scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +   facet_wrap(~cohort) +
+  xlab("") + ylab("")
+print(cr_map)
+
+ranges_map <- ggarrange(hr_map, cr_map, 
+                         ncol=1, nrow=2, widths=c(3,3))
+ranges_map
+
+jpeg(file="figures/ranges map by cohort.jpeg", 
+     width=3000, height=3000, units="px", res=500)
+ranges_map
+dev.off()
+```
+
+
+```{r, eval=FALSE, results='hide'}
 list <- unique(core_range$id)
 out <- data.frame()
 
@@ -724,10 +849,6 @@ overlap <- data.frame(left_join(st_drop_geometry(home_overlap), #extract areas
                                 by=c("name", "name2"))) %>%
   rename(home_overlap=overlap.x, core_overlap=overlap.y)
 
-lookup_distinct <- as.data.frame(lookup) %>% 
-  dplyr::select(-period, -fixes) %>%
-  distinct(name, cohort, morph) 
-
 lookup_distinct2 <- lookup_distinct %>%
   rename(name2=name, cohort2=cohort, morph2=morph) #to lookup cohort of second quoll
 
@@ -737,13 +858,14 @@ overlap <- overlap %>%
   mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
 overlap[is.na(overlap)] <- 0
 
-write.csv(overlap, "Data - overlap per individual.csv")
+write.csv(overlap, "processed data/overlap per individual.csv")
 ```
+
 
 ### **Models and summaries**
 
 ```{r}
-overlap <- read.csv("Data - overlap per individual.csv") %>%
+overlap <- read.csv("processed data/overlap per individual.csv") %>%
     mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
 
 round(coef(summary(glm(home_overlap ~ cohort + morph, 
@@ -790,9 +912,9 @@ home_boxplot <- ggplot(data=ranges_model,
         axis.ticks.x=element_blank(),
         axis.ticks.y=element_blank(),
         legend.position="none") +
-  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("Cohort") + ylab("Home range (hectares)") +
-  annotate(geom="text", x=1, y=600, label="a", fontface="bold", size=6)
+  annotate(geom="text", x=1, y=600, label="a)", fontface="bold", size=6)
 
 # Regression plot
 home_time <- ggplot(data=ranges_data, aes(x=night_12hr, 
@@ -809,10 +931,10 @@ home_time <- ggplot(data=ranges_data, aes(x=night_12hr,
         strip.background=element_rect(colour="black", fill="grey15"), 
         strip.text=element_text(colour="white")) +
   #scale_colour_manual(values=viridis(2, begin=0.9, end=0.5)) +
-  scale_fill_manual(values=viridis(2, begin=0.9, end=0.5)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("Study night") + ylab(expression(paste(""))) +
   labs(fill="Cohort") +
-  annotate(geom="text", x=45, y=300, label="b", fontface="bold", size=6)
+  annotate(geom="text", x=45, y=300, label="b)", fontface="bold", size=6)
 
 # Boxplot
 home_overlap_plot <- ggplot(overlap, aes(x=cohort, 
@@ -828,11 +950,11 @@ home_overlap_plot <- ggplot(overlap, aes(x=cohort,
         axis.ticks.y = element_blank(),
         strip.background = element_rect(colour="black", fill="grey15"), 
         strip.text = element_text(colour="white")) +
-  scale_colour_manual(values=viridis(2, begin=0.9, end=0.5)) +
-  scale_fill_manual(values=viridis(2, begin=0.9, end=0.5)) +
+  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
+  scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("Cohort") + labs(fill="Cohort") +
   ylab(expression(paste("Home range overlap (hectares)"))) +
-  annotate(geom="text", x=1, y=250, label="c", fontface="bold", size=6)
+  annotate(geom="text", x=1, y=250, label="c)", fontface="bold", size=6)
 home_overlap_plot
 
 ranges_plot <- ggarrange(home_boxplot, home_time,home_overlap_plot,
@@ -841,7 +963,7 @@ ranges_plot
 ```
 
 ```{r, include=FALSE}
-jpeg(file="Fig - ranges per cohort.jpeg", 
+jpeg(file="figures/ranges per cohort.jpeg", 
      width=4750, height=1500, units="px", res=500)
 ranges_plot
 dev.off()
@@ -996,7 +1118,7 @@ nvis_barplot <- ggplot(nvis_groups, col="grey15",
   labs(fill="MFWS habitat") +
   xlab("NVIS major vegetation group") + 
   ylab(expression(paste("Area (", km^2, ")"))) +
-  annotate(geom="text", x=8, y=2.0, label="a", fontface="bold", size=6)
+  annotate(geom="text", x=8, y=2.0, label="a)", fontface="bold", size=6)
 
 # Map plot
 nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp") %>%
@@ -1006,8 +1128,14 @@ nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp") %>%
                           levels=c("Eucalypt woodland", 
                                    "Eucalypt forest", "Regrowth", 
                                    "Grassland", "Aquatic")))
+
 nvis_mfws <- ggplot() + 
-  geom_sf(nvis, mapping=aes(fill=mfws_name), col="grey15", alpha=0.8) + 
+  geom_sf(st_zm(nvis), mapping=aes(fill=mfws_name), 
+          col="grey15", alpha=0.8) + 
+  annotation_scale(style="ticks", tick_height=0.5,
+                   width_hint=0.3, 
+                   pad_x=unit(1.55, "cm"),
+                   pad_y=unit(0, "cm")) +
   theme(axis.line.x = element_blank(),
         axis.line.y = element_blank(),
         legend.position = c(0.75, 0.15),
@@ -1029,7 +1157,8 @@ nvis_mfws <- ggplot() +
   scale_fill_manual(values=viridis(5, begin=0.9, end=0.1)) +
   labs(fill="MFWS habitat", x=NULL, y=NULL) +
   annotate(geom="text", y=-35.157, x=149.186, 
-           label="b", fontface="bold", size=6)
+           label="b)", fontface="bold", size=6)
+nvis_mfws
 
 nvis_methods <- ggarrange(nvis_barplot, nvis_mfws, 
                           ncol=2, nrow=1, widths=c(4.75, 3))
@@ -1037,7 +1166,7 @@ nvis_methods
 ```
 
 ```{r, include=FALSE}
-jpeg(file="Fig - nvis habitat barplot and map.jpeg", 
+jpeg(file="figures/nvis habitat barplot and map.jpeg", 
      width=5000, height=2000, units="px", res=500)
 print(nvis_methods)
 dev.off()
@@ -1051,7 +1180,7 @@ Here we calculate the frequency of nocturnal locations (GPS fixes) per habitat t
 
 ```{r}
 #data for plots
-noc <- read.csv("Data - coordinates curated.csv") %>%
+noc <- read.csv("processed data/coordinates curated.csv") %>%
   group_by(mfws_habitat) %>% count() %>% 
   # Create frequency and percentage (adjusted by frequency of fixes) variables
   mutate(freq=n, perc=(freq/2950)*100)
@@ -1075,7 +1204,7 @@ noc_plot <- noc %>% clean_names() %>%
          type="Nocturnal activity")
 
 # Read in coordinates for modelling
-noc_period <- read.csv("Data - coordinates curated.csv") %>%
+noc_period <- read.csv("processed data/coordinates curated.csv") %>%
   group_by(cohort, period, morph, name, mfws_habitat) %>%
   summarise(fixes=length(mfws_habitat))
 
@@ -1105,12 +1234,12 @@ We also quantified eastern quoll habitat use using the following LiDAR rasters:
 pacman::p_load(ggpubr, lme4, MuMIn, plotrix, raster, sf, viridis)
 
 # Read in raster data
-overstory <- raster("mfgo_overstory.tif")
-understory <- raster("mfgo_understory.tif")
-aspect <- raster("mfgo_aspect.tif")
+overstory <- raster("rasters/mfgo_overstory.tif")
+understory <- raster("rasters/mfgo_understory.tif")
+aspect <- raster("rasters/mfgo_aspect.tif")
 
 # Read in coordinates data
-noc <- read.csv("Data - coordinates curated.csv") %>%
+noc <- read.csv("processed data/coordinates curated.csv") %>%
   mutate(easting=as.numeric(easting),
          northing=as.numeric(northing))
 
@@ -1142,19 +1271,19 @@ mf_fence <- st_read("shapefiles/mfws_fence.shp", quiet=TRUE) %>%
 # Extract available overstory in MFWS
 overstory_mf <- as.data.frame(rasterToPoints(mask(overstory, mf_fence))) %>%
   mutate(type="Available", raster="Overstory", 
-         raster_units=Raster_._MFGO_overstory*100) %>%
+         raster_units=mfgo_overstory*100) %>%
   dplyr::select(type, raster, raster_units)
 
 # Extract available understory in MFWS
 understory_mf <- as.data.frame(rasterToPoints(mask(understory, mf_fence))) %>%
   mutate(type="Available", raster="Understory",
-         raster_units=Raster_._MFGO_understory*100) %>%
+         raster_units=mfgo_understory*100) %>%
   dplyr::select(type, raster, raster_units)
 
 # Extract available aspects in MFWS
 aspect_mf <- as.data.frame(rasterToPoints(mask(aspect, mf_fence))) %>%
   mutate(type="Available", raster="Aspect",
-         raster_units=Raster_._MFGO_aspect) %>%
+         raster_units=mfgo_aspect) %>%
   dplyr::select(type, raster, raster_units) 
 
 # Combine raster values into single df
@@ -1514,7 +1643,7 @@ noc_nvis_plot <- ggplot(noc_plot, aes(x=mfws_habitat, y=freq_adj,
   scale_x_discrete(labels=wrap_format(3)) +
   ggtitle("Nocturnal activity") + xlab("") + 
   ylab(expression(paste("Adjusted frequency (per ", km^2, ")"))) +
-  annotate(geom="text", x=1, y=1500, label="a", fontface="bold", size=6)
+  annotate(geom="text", x=1, y=1500, label="a)", fontface="bold", size=6)
 
 diu_nvis_plot <- ggplot(diu_plot, aes(x=mfws_habitat, y=freq_adj,
                                   fill=mfws_habitat), col="grey15") + 
@@ -1535,7 +1664,7 @@ diu_nvis_plot <- ggplot(diu_plot, aes(x=mfws_habitat, y=freq_adj,
   scale_fill_manual(values=viridis(4, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) +
   ggtitle("Diurnal denning") + xlab("") + ylab("") +
-  annotate(geom="text", x=1, y=150, label="b", fontface="bold", size=6)
+  annotate(geom="text", x=1, y=150, label="b)", fontface="bold", size=6)
 
 nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot, 
                        ncol=2, nrow=1, widths=c(3,3))
@@ -1544,7 +1673,7 @@ nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot,
 ```
 
 ```{r, include=FALSE}
-jpeg(file="Fig - nvis habitat frequency.jpeg", 
+jpeg(file="figures/nvis habitat frequency.jpeg", 
      width=3500, height=1750, units="px", res=500)
 print(nvis_plot)
 annotate_figure(nvis_plot, bottom=textGrob("MFWS habitat", gp=gpar(cex=1)))
@@ -1572,7 +1701,7 @@ lidar_os_plot <- ggplot(data=lidar_os, aes(x=type, y=raster_units)) +
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
   xlab("") + ylab("Overstory layer cover (%)") +
-  annotate(geom="text", x=2, y=70, label="a", fontface="bold", size=6)
+  annotate(geom="text", x=2, y=72, label="a)", fontface="bold", size=6)
 
 lidar_us_plot <- ggplot(data=lidar_us, 
                          aes(x=type, y=raster_units)) +
@@ -1589,7 +1718,7 @@ lidar_us_plot <- ggplot(data=lidar_us,
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
   xlab("") + ylab("Understory layer cover (%)") +
-  annotate(geom="text", x=2, y=30, label="b", fontface="bold", size=6)
+  annotate(geom="text", x=2, y=39, label="b)", fontface="bold", size=6)
 
 lidar_as_plot <- ggplot(data=lidar_as, aes(x=type, y=raster_units)) +
   geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
@@ -1605,7 +1734,7 @@ lidar_as_plot <- ggplot(data=lidar_as, aes(x=type, y=raster_units)) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
   xlab("") + ylab("Aspect (degrees)") +
-  annotate(geom="text", x=2, y=80, label="c", fontface="bold", size=6)
+  annotate(geom="text", x=2, y=62, label="c)", fontface="bold", size=6)
 
 lidar_plot <- ggarrange(lidar_os_plot, lidar_us_plot, lidar_as_plot,
                         ncol=3, nrow=1, widths=c(2,2,2), label.x=0.89, 
@@ -1615,7 +1744,7 @@ print(lidar_plot)
 ```
 
 ```{r, include=FALSE}
-jpeg(file="Fig - lidar habitat use.jpeg", 
+jpeg(file="figures/lidar habitat use.jpeg", 
      width=4500, height=1500, units="px", res=500)
 print(lidar_plot)
 dev.off()
@@ -1637,7 +1766,7 @@ To quantify conspecific associations, we used the [wildlifeDI package](https://w
   1. Study period
 
 ```{r, eval=FALSE}
-data <- read.csv("Data - coordinates curated.csv") %>% 
+data <- read.csv("processed data/coordinates curated.csv") %>% 
   mutate(date_time_12hr=as.POSIXct(strptime(date_time_12hr, 
                                             format="%Y-%m-%d %H:%M",
                                             tz="Australia/Sydney")))
@@ -1869,7 +1998,7 @@ interact_settlement <- interact %>% #remove any duplicate pairs
 interact <- rbind(interact_baseline, interact_release,
                   interact_settlement, interact_study)
 
-write.csv(interact, "Data - interaction coefficients.csv")
+write.csv(interact, "processed data/interaction coefficients.csv")
 ```
 
 The `interact` dataframe now contains several dynamic interaction coefficients for each combination of quolls for each study period. 
@@ -1877,7 +2006,7 @@ The `interact` dataframe now contains several dynamic interaction coefficients f
 Now we add `cohort` and `morph` back into the dataframe using a `lookup `table, and averaged each of the coefficients per individual per `period` for our summary statistics.
 
 ```{r}
-interact <- read.csv("Data - interaction coefficients.csv") %>%
+interact <- read.csv("processed data/interaction coefficients.csv") %>%
   mutate(name=quoll1) %>%
   na.omit() %>%
   merge(lookup, by=c("name", "period")) %>%
@@ -1994,7 +2123,7 @@ pear_period_plot <- ggplot(data=interact, aes(x=period, y=as.numeric(cr))) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
-        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        plot.margin = unit(c(0.1, 0, 0, 0.1), "cm"),
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
@@ -2003,7 +2132,7 @@ pear_period_plot <- ggplot(data=interact, aes(x=period, y=as.numeric(cr))) +
         strip.text = element_text(colour="white")) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
   xlab("Study period") + ylab("Pearson correlation coefficient") +
-  annotate(geom="text", x=3, y=1, label="a", fontface="bold", size=6)
+  annotate(geom="text", x=0.75, y=0.8, label="a)", fontface="bold", size=6)
 
 pear_morph_plot <- ggplot(data=interact, aes(x=morph, y=as.numeric(cr))) +
   geom_boxplot(aes(fill=morph), col="grey15", alpha=0.8) +
@@ -2017,9 +2146,9 @@ pear_morph_plot <- ggplot(data=interact, aes(x=morph, y=as.numeric(cr))) +
         legend.position = "none",
         strip.background = element_rect(colour="black", fill="grey15"), 
         strip.text = element_text(colour="white")) +
-  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  scale_fill_manual(values = viridis(2, begin=0.9, end=0.1)) +
   xlab("Morph") + ylab("") +
-  annotate(geom="text", x=1, y=0.8, label="b", fontface="bold", size=6)
+  annotate(geom="text", x=0.7, y=0.8, label="b)", fontface="bold", size=6)
 
 coden_plot <- ggplot(data=sharing_plot, 
                       aes(x=cohort, y=as.numeric(probability))) +
@@ -2032,9 +2161,9 @@ coden_plot <- ggplot(data=sharing_plot,
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
         legend.position = "none") +
-  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  scale_fill_manual(values = viridis(2, begin=0.9, end=0.1)) +
   xlab("Cohort") + ylab("Probability of den sharing") +
-  annotate(geom="text", x=2, y=1, label="c", fontface="bold", size=6)  
+  annotate(geom="text", x=0.65, y=0.95, label="c)", fontface="bold", size=6)  
 
 interact_plot <- ggarrange(pear_period_plot, pear_morph_plot, coden_plot,
                            ncol=3, nrow=1, label.x=0.89, widths=c(2.25,2,2),
@@ -2045,7 +2174,7 @@ print(interact_plot)
 ```
 
 ```{r, include=FALSE}
-jpeg(file="Fig - interaction per fixed effects.jpeg", 
+jpeg(file="figures/interaction by fixed effects.jpeg", 
      width=4500, height=1500, units="px", res=500)
 print(interact_plot)
 dev.off()
@@ -2058,7 +2187,7 @@ By following a [gganimate tutorial by Katherine Goode](https://goodekat.github.i
 ```{r, eval=FALSE}
 pacman::p_load(gganimate, ggplot2, tidyverse, transformr)
 
-quoll_animation <- read.csv("1c coordinates curated.csv") %>%
+quoll_animation <- read.csv("processed data/coordinates curated.csv") %>%
   mutate(name=factor(name)) %>%
   #mutate(image=bat_image_link) %>%
   ggplot(aes(x=longitude, y=latitude, color=aest, group=name)) +
@@ -2084,7 +2213,7 @@ animate(quoll_animation) #nframes=300
 anim_save(quoll_animation, "Ani - Quoll animation.gif")
 ```
 
-# **Session info**
+# **Session information**
 
 ```{r}
 # Display version information for R, OS, and packages
