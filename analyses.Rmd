@@ -677,11 +677,11 @@ On average, resident home ranges were 89.89 ha (±11.46) and core ranges were 19
 
 ## Conspecific overlap
 
-### Data curation
-
 We also calculated the area of home and core range overlap (or static interaction) between dyads (pairs) of individuals using `st_intersection`.
 
-#### Home range map
+### Data curation
+
+Compile range shapefiles
 
 ```{r}
 lookup_distinct <- as.data.frame(lookup) %>% 
@@ -692,15 +692,32 @@ hr_lookup <- home_range %>%
   merge(lookup_distinct, by=c("id")) %>%
   mutate(cohort=ifelse(cohort=="Resident", "Residents", "Reinforcers")) %>%
   mutate(cohort=factor(cohort,
-                       levels=c("Residents","Reinforcers")))
+                       levels=c("Residents","Reinforcers")), 
+         range_type="Home range (95% KUD)")
 
+cr_lookup <- core_range %>% 
+  merge(lookup_distinct, by=c("id")) %>%
+  mutate(cohort=ifelse(cohort=="Resident", "Residents", "Reinforcers")) %>%
+  mutate(cohort=factor(cohort,
+                       levels=c("Residents","Reinforcers")), 
+         range_type="Core range (50% KUD)")
+
+hr_cr_lookup <- rbind(hr_lookup, cr_lookup) %>%
+    mutate(range_type=factor(range_type,
+                             levels=c("Home range (95% KUD)",
+                                      "Core range (50% KUD)")))
+```
+
+### Maps
+
+```{r}
 # Map
-hr_map <- ggplot(hr_lookup) + 
+hr_cr_map <- ggplot(hr_cr_lookup) +
   geom_path(mfws, mapping=aes(x=long, y=lat), col="grey15") +
   geom_sf(aes(fill=id, col=id), alpha=0.2) + 
   coord_sf(xlim=c(695750, 699505), ylim=c(6104500, 6107675)) +
   annotation_scale(style="ticks", tick_height=0.5,
-                   width_hint=0.3, pad_x=unit(4.2, "cm"),
+                   width_hint=0.3, pad_x=unit(3.7, "cm"),
                    pad_y=unit(0.2, "cm")) +
   theme(panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(),
@@ -714,21 +731,27 @@ hr_map <- ggplot(hr_lookup) +
         plot.margin = unit(c(0, 0.2, 0, 0), "cm"),
         strip.background=element_rect(colour="black",
                                       fill="grey15"), 
-        strip.text=element_text(colour="white")) +
+        strip.text=element_text(colour="white"), 
+        strip.text.y = element_text()) +
   scale_fill_viridis(discrete=T, option="D", begin=1, end=0) +
-  scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +   facet_wrap(~cohort) +
+  scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +
+  facet_grid(range_type ~ cohort, switch = 'y') +
   xlab("") + ylab("")
-print(hr_map)
+
+print(hr_cr_map)
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/home range map by cohort.jpeg", 
-     width=3000, height=1500, units="px", res=500)
-hr_map
+jpeg(file="figures/ranges map by cohort and type.jpeg", 
+     width=3000, height=2650, units="px", res=500)
+hr_cr_map
 dev.off()
 ```
 
+### Calculate overlap
+
 ```{r, eval=FALSE, results='hide'}
+# Home range overlap
 list <- unique(home_range$id)
 out <- data.frame()
 
@@ -743,91 +766,8 @@ home_overlap <- out %>%
   mutate(area_int=as.numeric(st_area(.))*0.0001) %>%
   rename(name=id, name2=id.1, overlap=area_int) %>%
   dplyr::select(-area, -area.1)
-```
 
-#### Map
-
-```{r}
-cr_lookup <- core_range %>% 
-  merge(lookup_distinct, by=c("id")) %>%
-  mutate(cohort=ifelse(cohort=="Resident", "Residents", "Reinforcers")) %>%
-  mutate(cohort=factor(cohort,
-                       levels=c("Residents","Reinforcers")))
-
-# Map
-cr_map <- ggplot(cr_lookup) + 
-  geom_path(mfws, mapping=aes(x=long, y=lat), col="grey15") +
-  geom_sf(aes(fill=id, col=id), alpha=0.2) + 
-  coord_sf(xlim=c(695750, 699505), ylim=c(6104500, 6107675)) +
-  annotation_scale(style="ticks", tick_height=0.5,
-                   width_hint=0.3, pad_x=unit(4.2, "cm"),
-                   pad_y=unit(0.2, "cm")) +
-  theme(panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.border = element_blank(),
-        panel.background = element_rect(fill="white"),
-        legend.position="none", 
-        axis.text.x = element_blank(), 
-        axis.text.y = element_blank(), 
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        plot.margin = unit(c(0, 0, 0, 0), "cm"),
-        strip.background=element_rect(colour="black",
-                                      fill="grey15"), 
-        strip.text=element_text(colour="white")) +
-  scale_fill_viridis(discrete=T, option="D", begin=1, end=0) +
-  scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +   facet_wrap(~cohort) +
-  xlab("") + ylab("")
-print(cr_map)
-```
-
-```{r, include=FALSE}
-jpeg(file="figures/core range map by cohort.jpeg", 
-     width=3000, height=1500, units="px", res=500)
-cr_map
-dev.off()
-```
-
-Generate version of map where core ranges has no facet strip.
-
-```{r}
-# Map
-cr_map <- ggplot(cr_lookup) + 
-  geom_path(mfws, mapping=aes(x=long, y=lat), col="grey15") +
-  geom_sf(aes(fill=id, col=id), alpha=0.2) + 
-  coord_sf(xlim=c(695750, 699505), ylim=c(6104500, 6107675)) +
-  annotation_scale(style="ticks", tick_height=0.5,
-                   width_hint=0.3, pad_x=unit(4.2, "cm"),
-                   pad_y=unit(0.2, "cm")) +
-  theme(panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.border = element_blank(),
-        panel.background = element_rect(fill="white"),
-        legend.position="none", 
-        axis.text.x = element_blank(), 
-        axis.text.y = element_blank(), 
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        plot.margin = unit(c(0, 0.2, 0, 0), "cm"),
-        strip.background = element_blank(),
-        strip.text.x = element_blank()) +
-  scale_fill_viridis(discrete=T, option="D", begin=1, end=0) +
-  scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +   facet_wrap(~cohort) +
-  xlab("") + ylab("")
-print(cr_map)
-
-ranges_map <- ggarrange(hr_map, cr_map, 
-                         ncol=1, nrow=2, widths=c(3,3))
-ranges_map
-
-jpeg(file="figures/ranges map by cohort.jpeg", 
-     width=3000, height=3000, units="px", res=500)
-ranges_map
-dev.off()
-```
-
-
-```{r, eval=FALSE, results='hide'}
+# Core range overlap
 list <- unique(core_range$id)
 out <- data.frame()
 
@@ -861,8 +801,7 @@ overlap[is.na(overlap)] <- 0
 write.csv(overlap, "processed data/overlap per individual.csv")
 ```
 
-
-### **Models and summaries**
+### Models and summaries
 
 ```{r}
 overlap <- read.csv("processed data/overlap per individual.csv") %>%
