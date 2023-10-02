@@ -42,15 +42,8 @@ First, we installed the [pacman Package Management Tool](https://cran.r-project.
 pacman::p_load(adehabitatHR, adehabitatLT, brglm, corrplot, data.table,
                dplyr, ggplot2, ggpmisc, ggpubr, ggspatial, grid,
                gridExtra, gtools, janitor, lme4, lubridate, MuMIn,
-               plotrix, rstudioapi, raster, readxl, rgdal, RODBC,
-               scales, sf, sp, tidyr, tidyverse, viridis, wildlifeDI)
-```
-
-We also set the working directly to where this R markdown is saved using the `rstudioapi` package.
-
-```{r}
-# Set the working directory to where this markdown is saved
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+               plotrix, raster, readxl, rgdal, RODBC, scales, sf, 
+               sp, tidyr, tidyverse, viridis, wildlifeDI)
 ```
 
 # **Data curation**
@@ -405,9 +398,14 @@ data.frame(Measure=c("Distance per fix:", "Distance per night:"),
                   mean(model_data$distance_night)),
            SE=c(std.error(model_data$distance_fix), 
                 std.error(model_data$distance_night)))
+
+model_data %>%
+  group_by(period) %>%
+  summarise(mean=mean(distance_night), 
+            se=std.error(distance_night)) 
 ```
 
-We found no significant differences in distance travelled per fix for any of the fixed effects (*p* > 0.05). On average, eastern quolls travelled 0.23 km (±0.01 SE) per fix, and 1.75 km (±0.08 SE) per night.
+We found study period had a significant effect on the distances travelled per night (p = 0.01), with the greatest distances being travelled during the release period (2.15 km ± 0.18). Across the whole study, eastern quolls travelled an average of 1.75 km (±0.08) per night.
 
 ## Plot
 
@@ -415,29 +413,23 @@ Finally, we plot mean distance across all individuals since no fixed effects wer
 
 ```{r, fig.align="center", fig.width=4, fig.height=3}
 dist_plot <- ggplot(data=distance_night, 
-                    aes(y=as.numeric(distance))) +
-  geom_boxplot(fill=viridis(1, begin=0.5), 
-               col="grey15", size=0.6, alpha=0.8) +
+                      aes(x=period, y=as.numeric(distance))) +
+  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=6, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
+        plot.margin=unit(c(0.1, 0, 0, 0.2), "cm"),
         axis.line=element_line(colour="black"),
-        axis.text.x=element_blank(),
         axis.ticks.x=element_blank(),
         axis.ticks.y=element_blank(),
-        legend.position="none",
-        strip.background=element_rect(colour="black", fill="grey15"), 
-        strip.text=element_text(colour="white")) +
-  ylab("Distance travelled per night (km)")
-dist_plot
+        legend.position="none") + 
+  scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
+  xlab("Study period") + ylab("Distance travelled per night (km)")
+print(dist_plot)
 ```
 
-```{r, include=FALSE}
-jpeg(file="figures/distance across individuals.jpeg", 
-     width=2000, height=1500, units="px", res=500)
-dist_plot
-dev.off()
-```
+We will add to a grid of figures along with the home and core range results below.
 
 # **Range**
 
@@ -628,11 +620,17 @@ ranges_model <- read.csv("processed data/ranges per period.csv") %>%
   subset(period!="Study") %>%
   mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
 
-round(coef(summary(glm(home_range ~ cohort + period + morph, 
-                       data=ranges_model))), digits=4)
+mod <- glm(home_range ~ cohort + period + morph, 
+           data=ranges_model)
+anova(mod)
+car::Anova(mod)
+summary(mod)
 
-round(coef(summary(glm(core_range ~ cohort + period + morph, 
-                       data=ranges_model))), digits=4)
+mod <- glm(core_range ~ cohort + period + morph, 
+           data=ranges_model)
+anova(mod)
+car::Anova(mod)
+summary(mod)
 ```
 
 We found there were significant differences between `cohort`s for `home_range` (*p* < 0.02) and `core_range` (*p* < 0.0403). 
@@ -643,18 +641,26 @@ Next we use generalised linear mixed-effects models (GLMMs) to test the fixed ef
 
 ```{r}
 random_effects <- model_data %>%
-  dplyr::select(night_12hr, day, min_temp, max_temp, precip, moon) %>%
+  dplyr::select(night_12hr, day, min_temp, 
+                max_temp, precip, moon) %>%
   distinct(night_12hr, .keep_all=T)
 
 ranges_data <- read.csv("processed data/ranges per day.csv") %>%
-  mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer"))) %>%
+  mutate(cohort=factor(cohort, 
+                       levels=c("Resident", "Reinforcer"))) %>%
   left_join(random_effects, by="night_12hr")
 
-round(coef(summary(glm(home_range ~ night_12hr + cohort + morph, 
-                       data=ranges_data))), digits=4)
+mod <- glm(home_range ~ night_12hr + cohort + morph, 
+                       data=ranges_data)
+anova(mod)
+car::Anova(mod)
+summary(mod)
 
-round(coef(summary(glm(core_range ~ night_12hr + cohort + morph, 
-                       data=ranges_data))), digits=4)
+mod <- glm(core_range ~ night_12hr + cohort + morph, 
+                       data=ranges_data)
+anova(mod)
+car::Anova(mod)
+summary(mod)
 
 ranges_res <- subset(ranges_data, cohort=="Resident")
 ranges_fou <- subset(ranges_data, cohort=="Reinforcer")
@@ -668,21 +674,38 @@ ggplot(data = ranges_fou, aes(night_12hr, home_range)) +
 
 We found residents exhibited relatively constant ranges (home range R2 = 0.02, core range R2 = 0.01), and reinforcers exhibited significantly negative trends in ranges (home and core ranges R2 = 0.07) over the study period.
 
+**Summary statistics**
+
 ```{r}
 res_ranges <- subset(ranges_model, cohort=="Resident")
 fou_ranges <- subset(ranges_model, cohort=="Reinforcer")
 
-# Summary statistics
-data.frame(Cohort=c("Resident", "Resident", "Reinforcer", "Reinforcer"), 
-           Measure=rep(c("Home range (ha):", "Core range (ha):"), 2),
-           Mean=c(mean(res_ranges$home_range), 
-                  mean(res_ranges$core_range),
-                  mean(fou_ranges$home_range), 
-                  mean(fou_ranges$core_range)),
-           SE=c(std.error(res_ranges$home_range), 
-                std.error(res_ranges$core_range),
-                std.error(fou_ranges$home_range), 
-                std.error(fou_ranges$core_range)))
+ranges_model <- ranges_model %>%
+  mutate(overall="Overall")
+
+# Ranges overall
+ranges_model %>%
+  group_by(overall) %>%
+  summarise(mean_hr=mean(home_range),
+            se_hr=std.error(home_range),
+            mean_cr=mean(core_range),
+            se_cr=std.error(core_range))
+
+# Ranges by cohort
+ranges_model %>%
+  group_by(cohort) %>%
+  summarise(mean_hr=mean(home_range),
+            se_hr=std.error(home_range),
+            mean_cr=mean(core_range),
+            se_cr=std.error(core_range))
+
+# Ranges by period
+ranges_model %>%
+  group_by(period) %>%
+  summarise(mean_hr=mean(home_range),
+            se_hr=std.error(home_range),
+            mean_cr=mean(core_range),
+            se_cr=std.error(core_range))
 ```
 
 On average, resident home ranges were 89.89 ha (±11.46) and core ranges were 19.93 ha (±2.45), and reinforcer home ranges were 249.39 ha (±53.16) and core ranges were 47.32 ha (±11.25).
@@ -853,25 +876,33 @@ Finally, we plotted the significant differences in home range and home range ove
 
 ```{r, fig.align="center", fig.width=6, fig.height=3}
 # Boxplot
-home_boxplot <- ggplot(data=ranges_model, 
-                      aes(x=cohort, y=as.numeric(home_range))) +
+home_period <- ggplot(data=ranges_model, 
+                      aes(x=period, y=as.numeric(home_range))) +
   geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=600, label="b)", 
+           fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
-        plot.margin=unit(c(0.1, 0, 0, 0), "cm"),
+        plot.margin=unit(c(0.1, 0, 0, 0.2), "cm"),
         axis.line=element_line(colour="black"),
         axis.ticks.x=element_blank(),
         axis.ticks.y=element_blank(),
-        legend.position="none") +
+        legend.position=c(0.80, 0.8), 
+        legend.key = element_rect(fill = NA),
+        legend.background=element_blank()) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
-  xlab("Cohort") + ylab("Home range (hectares)") +
-  annotate(geom="text", x=1, y=600, label="a)", fontface="bold", size=6)
+  xlab("Study period") + ylab("Home range (hectares)") +
+  labs(fill="Cohort")
+print(home_period)
 
 # Regression plot
 home_time <- ggplot(data=ranges_data, aes(x=night_12hr, 
                                           y=as.numeric(home_range))) +
-  geom_smooth(method='lm', aes(fill=cohort), alpha=0.6, col="grey15") +
+  geom_smooth(method='lm', aes(fill=cohort, col=cohort), 
+              alpha=0.5) +
+  annotate(geom="text", x=50, y=300, label="c)", 
+           fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
@@ -881,43 +912,45 @@ home_time <- ggplot(data=ranges_data, aes(x=night_12hr,
         axis.ticks.x=element_blank(),
         axis.ticks.y=element_blank(),
         strip.background=element_rect(colour="black", fill="grey15"), 
-        strip.text=element_text(colour="white")) +
-  #scale_colour_manual(values=viridis(2, begin=0.9, end=0.5)) +
+        strip.text=element_text(colour="white"), 
+        legend.key = element_rect(fill = NA), 
+        legend.background=element_blank()) +
+  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
-  xlab("Study night") + ylab(expression(paste(""))) +
-  labs(fill="Cohort") +
-  annotate(geom="text", x=45, y=300, label="b)", fontface="bold", size=6)
+  xlab("Study night") + ylab("Home range (hectares)") +
+  labs(fill="Cohort", col="Cohort")
+print(home_time)
 
 # Boxplot
 home_overlap_plot <- ggplot(overlap, aes(x=cohort, 
                                          y=as.numeric(home_overlap))) +
   geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=250, label="d)", 
+           fontface="bold", size=6) + 
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
-        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        plot.margin = unit(c(0.1, 0, 0, 0.2), "cm"),
         legend.position = "none",
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        strip.background = element_rect(colour="black", fill="grey15"), 
-        strip.text = element_text(colour="white")) +
-  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
+        axis.ticks.y = element_blank()) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("Cohort") + labs(fill="Cohort") +
-  ylab(expression(paste("Home range overlap (hectares)"))) +
-  annotate(geom="text", x=1, y=250, label="c)", fontface="bold", size=6)
-home_overlap_plot
-
-ranges_plot <- ggarrange(home_boxplot, home_time,home_overlap_plot,
-                         ncol=3, nrow=1, widths=c(3,3,3))
-ranges_plot
+  ylab(expression(paste("Home range overlap (hectares)")))
+print(home_overlap_plot)
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/ranges per cohort.jpeg", 
-     width=4750, height=1500, units="px", res=500)
-ranges_plot
+# Add the distance plot from earlier to the range plots
+dist_ranges_plots <- ggarrange(dist_plot, home_period, 
+                         home_time, home_overlap_plot,
+                         ncol=2, nrow=2, widths=c(3,3,3,3))
+print(dist_ranges_plots)
+
+jpeg(file="figures/distance and ranges by fixed effects.jpeg", 
+     width=3500, height=2500, units="px", res=500)
+dist_ranges_plots
 dev.off()
 ```
 
@@ -1118,7 +1151,7 @@ nvis_methods
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/nvis habitat barplot and map.jpeg", 
+jpeg(file="figures/nvis habitat type barplot and map.jpeg", 
      width=5000, height=2000, units="px", res=500)
 print(nvis_methods)
 dev.off()
@@ -1296,21 +1329,32 @@ round(coef(summary(lmer(percentage ~ cohort*period + morph +
 
 Next, we used GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the habitat attributes (i.e., `overstory`, `understory`, and `aspect`) of nocturnal locations.
 
+⚠️🚩
+
 ```{r}
-round(coef(summary(lmer(overstory ~ cohort*period + morph + 
-                          (1|name), data=noc_lidar))), digits=4)
+mod <- lmer(overstory ~ cohort*period + morph + 
+              (1|name), data=noc_lidar)
+anova(mod) #F-statistic
+car::Anova(mod) #Chisq, p-value
+summary(mod) #t-statistic, random effects
 
-round(coef(summary(lmer(understory ~ cohort*period + morph + 
-                          (1|name), data=noc_lidar))), digits=4)
+mod <- lmer(understory ~ cohort*period + morph + 
+              (1|name), data=noc_lidar)
+anova(mod) #F-statistic
+car::Anova(mod) #Chisq, p-value
+summary(mod) #t-statistic, random effects
 
-round(coef(summary(lmer(aspect ~ cohort*period + morph + 
-                          (1|name), data=noc_lidar))), digits=4)
+mod <- lmer(aspect ~ cohort*period + morph + 
+              (1|name), data=noc_lidar)
+anova(mod) #F-statistic
+car::Anova(mod) #Chisq, p-value
+summary(mod) #t-statistic, random effects
 ```
 
-We found no significant differences in `overstory`, `understory`, and `aspect` values for nocturnal activity between `cohort`s, `period`s, and `morph`s (*p* > 0.05). 
+**Summary statistics**
 
 ```{r}
-#Summary statistics
+# Overall
 data.frame(Measure=c("Overstory (%):", 
                      "Understory (%):", 
                      "Aspect (degrees):"),
@@ -1320,6 +1364,18 @@ data.frame(Measure=c("Overstory (%):",
            SE=c(std.error(noc_lidar$overstory)*100, 
                 std.error(noc_lidar$understory)*100,
                 std.error(noc_lidar$aspect)))
+
+# Understory per period
+noc_lidar %>%
+  group_by(period) %>%
+  summarise(mean=mean(understory*100),
+            se=std.error(understory*100))
+
+# Aspect per period
+noc_lidar %>%
+  group_by(period) %>%
+  summarise(mean=mean(aspect),
+            se=std.error(aspect))
 ```
 
 On average, eastern quolls were active in areas with an `overstory` of 12.65% (layer cover, ±0.27), `understory` of 2.23 (layer cover, ±0.06), and `aspect` of 202.98° (±1.27, i.e., south-southwest-facing).
@@ -1478,10 +1534,10 @@ round(coef(summary(lmer(aspect ~ cohort*period + morph +
                           (1|name), data=diu_lidar))), digits=4)
 ```
 
-We found no significant differences in `overstory`, `understory`, and `aspect` values for diurnal denning (VHF locations) between `cohort`s, `period`s, and `morph`s (*p* > 0.05). 
+**Summary statistics**
 
 ```{r}
-# Summary statistics
+# Overall
 data.frame(Measure=c("Overstory (%):", 
                      "Understory (%):", 
                      "Aspect (degrees):"),
@@ -1491,6 +1547,18 @@ data.frame(Measure=c("Overstory (%):",
            SE=c(std.error(diu_lidar$overstory)*100, 
                 std.error(diu_lidar$understory)*100,
                 std.error(diu_lidar$aspect)))
+
+# Overstory per period
+diu_lidar %>%
+  group_by(period) %>%
+  summarise(mean=mean(overstory*100),
+            se=std.error(overstory*100))
+
+# Aspect per period
+diu_lidar %>%
+  group_by(period) %>%
+  summarise(mean=mean(aspect),
+            se=std.error(aspect))
 ```
 
 On average, eastern quolls denned in areas with an overstory of 20.88% (layer cover, ±0.89), understory of 2.60 (layer cover, ±0.14), and aspect of 207.27° (±2.41, i.e., south-southwest-facing).
@@ -1578,10 +1646,13 @@ round(coef(summary(glm(raster_units ~ type,
 Finally, we plot frequency of fixes (with percentages) adjusted for habitat availability (area).
 
 ```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=3}
-noc_nvis_plot <- ggplot(noc_plot, aes(x=mfws_habitat, y=freq_adj,
-                                  fill=mfws_habitat), col="grey15") + 
+noc_nvis_plot <- ggplot(noc_plot, 
+                        aes(x=mfws_habitat, y=freq_adj,
+                            fill=mfws_habitat), col="grey15") + 
   geom_col(size=0.5, col="grey15", alpha=0.8) +
   geom_text(aes(label = paste0(round(perc_adj, digits=1), "%"), vjust=-0.5)) +
+  annotate(geom="text", x=1, y=1500, label="a)", 
+           fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_blank(),
@@ -1597,13 +1668,15 @@ noc_nvis_plot <- ggplot(noc_plot, aes(x=mfws_habitat, y=freq_adj,
   scale_fill_manual(values=viridis(4, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) +
   ggtitle("Nocturnal activity") + xlab("") + 
-  ylab(expression(paste("Adjusted frequency (per ", km^2, ")"))) +
-  annotate(geom="text", x=1, y=1500, label="a)", fontface="bold", size=6)
+  ylab(expression(paste("Adjusted frequency (per ", km^2, ")"))) 
+print(noc_nvis_plot)
 
-diu_nvis_plot <- ggplot(diu_plot, aes(x=mfws_habitat, y=freq_adj,
-                                  fill=mfws_habitat), col="grey15") + 
+diu_nvis_plot <- ggplot(diu_plot, 
+                        aes(x=mfws_habitat, y=freq_adj,
+                            fill=mfws_habitat), col="grey15") + 
   geom_col(size=0.5, col="grey15", alpha=0.8) +
-  geom_text(aes(label = paste0(round(perc_adj, digits=1), "%"), vjust=-0.5)) +
+  geom_text(aes(label = paste0(round(perc_adj, digits=1), 
+                               "%"), vjust=-0.5)) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_blank(),
@@ -1620,6 +1693,7 @@ diu_nvis_plot <- ggplot(diu_plot, aes(x=mfws_habitat, y=freq_adj,
   scale_x_discrete(labels=wrap_format(3)) +
   ggtitle("Diurnal denning") + xlab("") + ylab("") +
   annotate(geom="text", x=1, y=150, label="b)", fontface="bold", size=6)
+print(diu_nvis_plot)
 
 nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot, 
                        ncol=2, nrow=1, widths=c(3,3))
@@ -1628,7 +1702,7 @@ nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot,
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/nvis habitat frequency.jpeg", 
+jpeg(file="figures/nvis habitat type frequency.jpeg", 
      width=3500, height=1750, units="px", res=500)
 print(nvis_plot)
 annotate_figure(nvis_plot, bottom=textGrob("MFWS habitat", gp=gpar(cex=1)))
@@ -1643,65 +1717,158 @@ lidar_us <- subset(lidar_plot, raster=="Understory")
 lidar_as <- subset(lidar_plot, raster=="Aspect")
 
 lidar_os_plot <- ggplot(data=lidar_os, aes(x=type, y=raster_units)) +
-  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
+  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +  
+  annotate(geom="text", x=0.7, y=72, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position = "none",
-        strip.background = element_rect(colour="black", fill="grey15"), 
-        strip.text = element_text(colour="white")) +
+        legend.position = "none") +
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
-  xlab("") + ylab("Overstory layer cover (%)") +
-  annotate(geom="text", x=2, y=72, label="a)", fontface="bold", size=6)
+  xlab("") + ylab("Overstory layer cover (%)")
+print(lidar_os_plot)
 
 lidar_us_plot <- ggplot(data=lidar_us, 
                          aes(x=type, y=raster_units)) +
   geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=39, label="b)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position = "none",
-        strip.background = element_rect(colour="black", fill="grey15"), 
-        strip.text = element_text(colour="white")) +
+        legend.position = "none") +
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
-  xlab("") + ylab("Understory layer cover (%)") +
-  annotate(geom="text", x=2, y=39, label="b)", fontface="bold", size=6)
+  xlab("") + ylab("Understory layer cover (%)")
+print(lidar_us_plot)
 
 lidar_as_plot <- ggplot(data=lidar_as, aes(x=type, y=raster_units)) +
   geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=355, label="c)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
+        legend.position = "none") +
+  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("") + ylab("Aspect (degrees)")
+print(lidar_as_plot)
+```
+
+Plot understory and aspect by period.
+
+```{r}
+lidar_us_period_noc <- ggplot(data=noc_lidar, 
+                              aes(x=period, y=understory*100)) +
+  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=30, label="d)", 
+           fontface="bold", size=6) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(hjust = 0.5),
         legend.position = "none",
         strip.background = element_rect(colour="black", fill="grey15"), 
         strip.text = element_text(colour="white")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("") + ylab("Aspect (degrees)") +
-  annotate(geom="text", x=2, y=62, label="c)", fontface="bold", size=6)
+  xlab("Study period") + ylab("Understory layer cover (%)") +
+  ggtitle("Nocturnal activity")
+print(lidar_us_period_noc)
 
-lidar_plot <- ggarrange(lidar_os_plot, lidar_us_plot, lidar_as_plot,
-                        ncol=3, nrow=1, widths=c(2,2,2), label.x=0.89, 
-                        label.y=0.99, hjust=-0.1, vjust=1.5,
-                        font.label=list(size=10, face="bold", color="black"))
-print(lidar_plot)
+lidar_as_period_noc <- ggplot(data=noc_lidar, 
+                              aes(x=period, y=aspect)) +
+  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=350, label="e)", 
+           fontface="bold", size=6) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "none") +
+  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("Study period") + ylab("Aspect (degrees)") +
+  ggtitle("Nocturnal activity")
+print(lidar_as_period_noc)
+
+lidar_os_period_diu <- ggplot(data=diu_lidar, 
+                              aes(x=period, y=overstory*100)) +
+  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=55, label="f)", 
+           fontface="bold", size=6) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "none") +
+  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("Study period") + ylab("Overstory layer cover (%)") +
+  ggtitle("Diurnal denning")
+print(lidar_os_period_diu)
+
+lidar_as_period_diu <- ggplot(data=diu_lidar, 
+                          aes(x=period, y=aspect)) +
+  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=350, label="g)", 
+           fontface="bold", size=6) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill="white"),
+        axis.line = element_line(colour="black"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "none") +
+  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("Study period") + ylab("Aspect (degrees)") +
+  ggtitle("Diurnal denning")
+print(lidar_as_period_diu)
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/lidar habitat use.jpeg", 
+lidar_avail_plots <- ggarrange(lidar_os_plot, lidar_us_plot, 
+                        lidar_as_plot, hjust=-0.1, vjust=1.5,
+                        nrow=1, ncol=3, widths=c(2,2,2), 
+                        label.x=0.89, label.y=0.99, 
+                        font.label=list(size=10, face="bold",
+                                        color="black"))
+
+jpeg(file="figures/lidar habitat use by availability.jpeg", 
      width=4500, height=1500, units="px", res=500)
-print(lidar_plot)
+print(lidar_avail_plots)
+dev.off()
+
+lidar_period_plots <- ggarrange(lidar_us_period_noc, lidar_as_period_noc,
+                        lidar_os_period_diu, lidar_as_period_diu,
+                        hjust=-0.1, vjust=1.5, nrow=2, ncol=2,
+                        widths=c(2,2,2,2), 
+                        label.x=0.89, label.y=0.99, 
+                        font.label=list(size=10, face="bold",
+                                        color="black"))
+
+jpeg(file="figures/lidar habitat use by period.jpeg", 
+     width=4000, height=3000, units="px", res=500)
+print(lidar_period_plots)
 dev.off()
 ```
 
@@ -1976,32 +2143,51 @@ Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` o
 
 ```{r, warning=FALSE}
 # Generate proximity index (prox)
-round(coef(summary(glm(prox ~ cohort*period + morph, 
-                       data=interact))), digits=4)
+mod <- glm(prox ~ cohort*period + morph, 
+           data=interact)
+anova(mod) #residual deviance
+car::Anova(mod) #chisq, p-value
+summary(mod) #t-value
 
 # Generate pearson correlation index (cr)
-round(coef(summary(glm(cr ~ cohort*period + morph, 
-                       data=interact))), digits=4)
+mod <- glm(cr ~ cohort*period + morph, 
+           data=interact)
+anova(mod) #residual deviance
+car::Anova(mod) #chisq, p-value
+summary(mod) #t-value
 
 # Generate coefficient of sociality (cs)
-round(coef(summary(glm(cs.Cs ~ cohort*period + morph, 
-                       data=interact))), digits=4)
+mod <- glm(cs.Cs ~ cohort*period + morph, 
+           data=interact)
+anova(mod) #residual deviance
+car::Anova(mod) #chisq, p-value
+summary(mod) #t-value
 
 # Generate coefficient of association (ca)
-round(coef(summary(glm(ca ~ cohort*period + morph, 
-                       data=interact))), digits=4)
+mod <- glm(ca ~ cohort*period + morph, 
+           data=interact)
+anova(mod) #residual deviance
+car::Anova(mod) #chisq, p-value
+summary(mod) #t-value
 ```
 
+**Summary statistics**
+
 ```{r}
-# Summary statistics for Pearson and period
+# Pearson by period
 interact %>% 
   group_by(period) %>%
-  summarise(cr_mean=mean(cr), cr_se=std.error(cr)) 
+  summarise(mean=mean(cr), se=std.error(cr)) 
 
-# Summary statistics for Pearson and morph
+# Pearson by morph
 interact %>% 
   group_by(morph) %>%
-  summarise(cr_mean=mean(cr), cr_se=std.error(cr)) 
+  summarise(mean=mean(cr), se=std.error(cr)) 
+
+# Sociality by period
+interact %>% 
+  group_by(period) %>%
+  summarise(mean=mean(cs.Cs), cs_se=std.error(cs.Cs)) 
 ```
 
 On average, Pearson coefficients were significantly lower during the settlement periods (-0.106 ±0.0290 SE) than the baseline period (0.00110 ±0.0207 SE) and the release periods (-0.0188 ±0.0243 SE, *p* < 0.00809), and were significantly higher for dark morphs (0.0258 ±0.0268 SE) than for fawn morphs (-0.0764 ±0.0204 SE, *p* < 0.00152).
@@ -2068,9 +2254,28 @@ sharing_plot <- sharing %>%
   mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
 ```
 
-We found residents were significantly more likely to share their diurnal dens with other collared eastern quolls (*p* < 0.0001), spending 49.11% their days den sharing compared to 26.46% for reinforcers. 
+**Summary statistics**
+
+We found residents were significantly more likely to share their diurnal dens with other collared eastern quolls (*p* < 0.0001), spending an average of 51.7% their days den sharing compared to 28.6% for reinforcers. 
 
 Two collared eastern quolls den shared only once (both reinforcers), six (five of which were reinforcers) den shared on 2-6 occasions, and six (four of which were residents) den shared on 11-20 occasions, and two den shared on 22 occasions each (both residents). 
+
+```{r}
+# Den sharing by period
+sharing_plot %>% 
+  na.omit() %>%
+  group_by(period) %>%
+  summarise(mean=mean(probability*100),
+            se=std.error(probability*100)) 
+
+# Den sharing by cohort
+sharing_plot %>% 
+  na.omit() %>%
+  group_by(cohort) %>%
+  summarise(mean=mean(probability*100),
+            se=std.error(probability*100)) 
+```
+
 
 Den sharing was also significantly less likely to occur during the release and settlement periods (*p* < 0.0013), occurring on 31.43% and 35.43% of days respectively, compared to 48.63% of days during the baseline period. 
 
@@ -2079,8 +2284,11 @@ Den sharing was also significantly less likely to occur during the release and s
 Finally, we plot these significant results.
 
 ```{r, fig.align="center", fig.width=6, fig.height=3}
-pear_period_plot <- ggplot(data=interact, aes(x=period, y=as.numeric(cr))) +
-  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+pear_period_plot <- ggplot(data=interact, 
+                           aes(x=period, y=as.numeric(cr))) +
+  geom_boxplot(aes(fill=morph), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=0.75, label="a)", 
+           fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2088,32 +2296,38 @@ pear_period_plot <- ggplot(data=interact, aes(x=period, y=as.numeric(cr))) +
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position = "none",
-        strip.background = element_rect(colour="black", fill="grey15"), 
-        strip.text = element_text(colour="white")) +
+        legend.position=c(0.73, 0.8), 
+        legend.key = element_rect(fill = NA), 
+        legend.background=element_blank()) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Pearson correlation coefficient") +
-  annotate(geom="text", x=0.75, y=0.8, label="a)", fontface="bold", size=6)
+  xlab("Study period") + 
+  ylab("Pearson correlation coefficient") +
+  labs(fill="Morph")
+print(pear_period_plot)
 
-pear_morph_plot <- ggplot(data=interact, aes(x=morph, y=as.numeric(cr))) +
-  geom_boxplot(aes(fill=morph), col="grey15", alpha=0.8) +
+soc_period_plot <- ggplot(data=interact, 
+                          aes(x=period, y=as.numeric(cr))) +
+  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=0.75, label="b)", 
+           fontface="bold", size=6) + 
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
-        plot.margin = unit(c(0.1, 0, 0, 0), "cm"),
+        plot.margin = unit(c(0.1, 0, 0, 0.1), "cm"),
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position = "none",
-        strip.background = element_rect(colour="black", fill="grey15"), 
-        strip.text = element_text(colour="white")) +
-  scale_fill_manual(values = viridis(2, begin=0.9, end=0.1)) +
-  xlab("Morph") + ylab("") +
-  annotate(geom="text", x=0.7, y=0.8, label="b)", fontface="bold", size=6)
-
+        legend.position = "none", 
+        legend.background=element_blank()) +
+  scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
+  xlab("Study period") + ylab("Coefficient of sociality") 
+print(soc_period_plot)
+  
 coden_plot <- ggplot(data=sharing_plot, 
-                      aes(x=cohort, y=as.numeric(probability))) +
+                      aes(x=period, y=as.numeric(probability))) +
   geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
+  annotate(geom="text", x=0.7, y=0.95, label="c)", 
+           fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2121,22 +2335,26 @@ coden_plot <- ggplot(data=sharing_plot,
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position = "none") +
+        legend.position=c(0.66, 0.8), 
+        legend.key = element_rect(fill = NA), 
+        legend.background=element_blank()) +
   scale_fill_manual(values = viridis(2, begin=0.9, end=0.1)) +
-  xlab("Cohort") + ylab("Probability of den sharing") +
-  annotate(geom="text", x=0.65, y=0.95, label="c)", fontface="bold", size=6)  
+  xlab("Study period") + ylab("Probability of den sharing") +
+  labs(fill="Cohort")
+print(coden_plot)
+```
 
-interact_plot <- ggarrange(pear_period_plot, pear_morph_plot, coden_plot,
-                           ncol=3, nrow=1, label.x=0.89, widths=c(2.25,2,2),
+```{r, include=FALSE}
+interact_plot <- ggarrange(pear_period_plot, soc_period_plot, 
+                           coden_plot, ncol=3, nrow=1, 
+                           label.x=0.89, widths=c(3,3,3),
                            label.y=0.99, hjust=-0.1, vjust=1.5, 
                            font.label=list(size=10, face="bold", 
                                            color="black"))
 print(interact_plot)
-```
 
-```{r, include=FALSE}
-jpeg(file="figures/interaction by fixed effects.jpeg", 
-     width=4500, height=1500, units="px", res=500)
+jpeg(file="figures/associations by fixed effects.jpeg", 
+     width=5500, height=1750, units="px", res=500)
 print(interact_plot)
 dev.off()
 ```
@@ -2152,13 +2370,15 @@ anova(mod) #F-value
 car::Anova(mod) #chisq + p-value
 summary(mod) #random effects
 
+
 # Home range
 mod <- lmer(home_range ~ (cohort*period) + morph + 
-              (1|name) + (1|day) + (1|precip) + (1|min_temp) + (1|moon),
-            data=ranges_data)
+              (1|name) + (1|day) + (1|precip) + 
+              (1|min_temp) + (1|moon), data=ranges_data)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
+
 
 # Core range
 mod <- lmer(core_range ~ (cohort*period) + morph + 
@@ -2167,6 +2387,7 @@ mod <- lmer(core_range ~ (cohort*period) + morph +
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
+
 
 # Conspecific overlap
 mod <- glm(home_overlap ~ cohort + morph, data=overlap)
@@ -2179,75 +2400,92 @@ anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
+
 # Nocturnal activity
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=woodland)
+
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=woodland)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=forest)
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=forest)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=regrowth)
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=regrowth)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=grassland)
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=grassland)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(overstory ~ cohort*period + morph + (1|name), data=noc_lidar)
+mod <- lmer(overstory ~ cohort*period + morph + 
+              (1|name), data=noc_lidar)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(understory ~ cohort*period + morph + (1|name), data=noc_lidar)
+mod <- lmer(understory ~ cohort*period + morph + 
+              (1|name), data=noc_lidar)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(aspect ~ cohort*period + morph + (1|name), data=noc_lidar)
+mod <- lmer(aspect ~ cohort*period + morph + 
+              (1|name), data=noc_lidar)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
+
 
 # Diurnal denning
 
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=woodland)
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=woodland)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=forest)
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=forest)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=regrowth)
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=regrowth)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=grassland)
+mod <- lmer(percentage ~ cohort*period + morph + 
+              (1|name), data=grassland)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(overstory ~ cohort*period + morph + (1|name), data=diu_lidar)
+mod <- lmer(overstory ~ cohort*period + morph + 
+              (1|name), data=diu_lidar)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(understory ~ cohort*period + morph + (1|name), data=diu_lidar)
+mod <- lmer(understory ~ cohort*period + morph + 
+              (1|name), data=diu_lidar)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-mod <- lmer(aspect ~ cohort*period + morph + (1|name), data=diu_lidar)
+mod <- lmer(aspect ~ cohort*period + morph + 
+              (1|name), data=diu_lidar)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
@@ -2267,7 +2505,9 @@ anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
+
 # Proximity index
+
 mod <- glm(prox ~ cohort*period + morph, data=interact)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
@@ -2294,9 +2534,11 @@ anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 ```
 
-# ⚠️**Animation**
+# **Animation**
 
 By following a [gganimate tutorial by Katherine Goode](https://goodekat.github.io/presentations/2019-isugg-gganimate-spooky/slides.html?fbclid=IwAR0xBuMZO0ZCKjx2SF6hTPL5lv8JMfALIlmwopA_QmqGddCuN6jab3msWsY#1), we created an animation showing the movement of the eastern quolls over the study period.
+
+ ⚠️ *Currently not working*
 
 ```{r, eval=FALSE}
 pacman::p_load(gganimate, ggplot2, tidyverse, transformr)
