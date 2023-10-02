@@ -23,7 +23,7 @@ knitr::opts_chunk$set(warning=FALSE, message=FALSE)
 
 We investigated whether conspecific associations between seven maternal **resident** (descedents of founders or reinforcers) eastern quolls (*Dasyurus viverrinus*, *murunguny* in the Indigenous Ngunnawal language) affected the establishment of eight maternal **reinforcers** (translocated from Tasmania to reinforce demographic, behavioural, and genetic diversity in the population) at [Mulligans Flat Woodland Sanctuary (MFWS)](https://www.mulligansflat.org.au/), a fenced reserve in the Australian Capital Territory.
 
-We used GPS collars to quantify distances travelled, home and core ranges, habitat use (foraging and denning), and conspecific associations. We compared these measures across three distinct periods:
+We used GPS collars to quantify **distances travelled**, **home** and **core ranges**, habitat use (**nocturnal activity** and **diurnal denning**), and **conspecific associations**. We compared these measures across three distinct periods:
 
   1. Baseline period (residents only, days 3-21),
   2. Release period (both cohorts, days 22-32), and
@@ -39,11 +39,11 @@ First, we installed the [pacman Package Management Tool](https://cran.r-project.
 
 ```{r}
 # Install and load required packages
-pacman::p_load(adehabitatHR, adehabitatLT, corrplot, data.table, dplyr,
-               ggplot2, ggpmisc, ggpubr, ggspatial, grid, gridExtra, gtools, janitor,
-               lme4, lubridate, MuMIn, plotrix, rstudioapi, raster, readxl,
-               rgdal, RODBC, scales, sf, sp, tidyr, tidyverse, viridis,
-               wildlifeDI)
+pacman::p_load(adehabitatHR, adehabitatLT, brglm, corrplot, data.table,
+               dplyr, ggplot2, ggpmisc, ggpubr, ggspatial, grid,
+               gridExtra, gtools, janitor, lme4, lubridate, MuMIn,
+               plotrix, rstudioapi, raster, readxl, rgdal, RODBC,
+               scales, sf, sp, tidyr, tidyverse, viridis, wildlifeDI)
 ```
 
 We also set the working directly to where this R markdown is saved using the `rstudioapi` package.
@@ -387,6 +387,10 @@ round(coef(summary(lmer(distance_fix ~ morph + (period*cohort) +
                 (1|name) + (1|precip) + (1|min_temp) + 
                 (1|moon), data=model_data))), digits=3)
 
+summary(lmer(distance_fix ~ morph + (period*cohort) + 
+                (1|name) + (1|precip) + (1|min_temp) + 
+                (1|moon), data=model_data))
+
 # Print model statistics for fixes and random predictors
 round(coef(summary(lmer(distance_night ~ morph + (period*cohort) +
                 (1|name) + (1|precip) + (1|min_temp) + 
@@ -635,9 +639,16 @@ We found there were significant differences between `cohort`s for `home_range` (
 
 We also ran a linear model to assess whether daily home and core ranges changed over time, we found the most parsimonious model included both cohort (home range p < 0.0002, core range p < 0.0001) and study night (home range p < 0.01, core range p < 0.0074).
 
+Next we use generalised linear mixed-effects models (GLMMs) to test the fixed effects of `cohort`, `period`, and `morph` on the distances each quoll travelled per fix and per night, with individual (`name`), `precip`itation, `min_temp`erature, `max_temp`erature, and `moon` illumination included as random effects.
+
 ```{r}
+random_effects <- model_data %>%
+  dplyr::select(night_12hr, day, min_temp, max_temp, precip, moon) %>%
+  distinct(night_12hr, .keep_all=T)
+
 ranges_data <- read.csv("processed data/ranges per day.csv") %>%
-    mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
+  mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer"))) %>%
+  left_join(random_effects, by="night_12hr")
 
 round(coef(summary(glm(home_range ~ night_12hr + cohort + morph, 
                        data=ranges_data))), digits=4)
@@ -661,6 +672,7 @@ We found residents exhibited relatively constant ranges (home range R2 = 0.02, c
 res_ranges <- subset(ranges_model, cohort=="Resident")
 fou_ranges <- subset(ranges_model, cohort=="Reinforcer")
 
+# Summary statistics
 data.frame(Cohort=c("Resident", "Resident", "Reinforcer", "Reinforcer"), 
            Measure=rep(c("Home range (ha):", "Core range (ha):"), 2),
            Mean=c(mean(res_ranges$home_range), 
@@ -820,6 +832,7 @@ We found significant differences between cohorts in the area of home (*p* < 0.00
 res_overlap <- subset(overlap, cohort=="Resident") %>% na.omit()
 fou_overlap <- subset(overlap, cohort=="Reinforcer") %>% na.omit()
 
+# Summary statistics
 data.frame(Cohort=c("Resident", "Resident", "Reinforcer", "Reinforcer"), 
            Measure=rep(c("Home range (ha):", "Core range (ha):"), 2),
            Mean=c(mean(res_overlap$home_overlap), 
@@ -1297,6 +1310,7 @@ round(coef(summary(lmer(aspect ~ cohort*period + morph +
 We found no significant differences in `overstory`, `understory`, and `aspect` values for nocturnal activity between `cohort`s, `period`s, and `morph`s (*p* > 0.05). 
 
 ```{r}
+#Summary statistics
 data.frame(Measure=c("Overstory (%):", 
                      "Understory (%):", 
                      "Aspect (degrees):"),
@@ -1467,6 +1481,7 @@ round(coef(summary(lmer(aspect ~ cohort*period + morph +
 We found no significant differences in `overstory`, `understory`, and `aspect` values for diurnal denning (VHF locations) between `cohort`s, `period`s, and `morph`s (*p* > 0.05). 
 
 ```{r}
+# Summary statistics
 data.frame(Measure=c("Overstory (%):", 
                      "Understory (%):", 
                      "Aspect (degrees):"),
@@ -1520,6 +1535,7 @@ avai_os <- subset(avai_lidar, raster=="Overstory")
 avai_us <- subset(avai_lidar, raster=="Understory")
 avai_as <- subset(avai_lidar, raster=="Aspect")
 
+# Summary statistics
 data.frame(Measure=c("Overstory (%):", "Understory (%):", 
                      "Aspect (degrees):"),
            Mean=c(mean(avai_os$raster_units), 
@@ -1696,7 +1712,7 @@ dev.off()
 To quantify conspecific associations, we used the [wildlifeDI package](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1) to calculate:
 
   - [Proximity index](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Prox), the proportion of (simultaneous) fixes that are proximal, based on a distance threshold (Bertrand *et al.* 1996) using the `Prox()` function, 
-  - [Movement correlation coefficient](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Cr), a Pearson product-moment correlation statistic (Shirabe 2006) using the `Cr()` function,
+  - [Pearson/Movement correlation coefficient](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Cr), a Pearson product-moment correlation statistic (Shirabe 2006) using the `Cr()` function,
   - [Coefficient of sociality](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Cs) between two moving objects (Kenward *et al.* 1993) using a signed significance Wilcoxon-rank test with the `Cs()` function.
   - [Coefficient of association](https://www.rdocumentation.org/packages/wildlifeDI/versions/0.4.1/topics/Ca), the dynamic interaction between two moving objects testing  the number of fixes the animals are observed together against the total number of fixes where `Ca > 0.5` indicates affiliation or fidelity, while `Ca < 0.5` indicates no association between the two animals(Cole 1949, Bauman 1998).
   
@@ -1977,12 +1993,14 @@ round(coef(summary(glm(ca ~ cohort*period + morph,
 ```
 
 ```{r}
-# Pearson and period
-interact %>% group_by(period) %>%
+# Summary statistics for Pearson and period
+interact %>% 
+  group_by(period) %>%
   summarise(cr_mean=mean(cr), cr_se=std.error(cr)) 
 
-# Pearson and morph
-interact %>% group_by(morph) %>%
+# Summary statistics for Pearson and morph
+interact %>% 
+  group_by(morph) %>%
   summarise(cr_mean=mean(cr), cr_se=std.error(cr)) 
 ```
 
@@ -2020,7 +2038,7 @@ dens <- coden %>%
   summarise(dens=n())
 ```
 
-Of the 51 unique den sites, we found that 13 dens were used once, 28 were used on 2-9 occasions, 9 were used on 10-39 occasions, and one den was used on 96 occasions. For three days in a row, this den was rested in by 5 collared eastern quolls at once. 
+Of the 51 unique den sites, we found that 13 dens were used once, 28 were used on 2-9 occasions, 9 were used on 10-39 occasions, and one den was used on 96 occasions. For three days in a row, this den was rested in by 5 collared eastern quolls at once.
 
 Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the probability of den sharing. We did not include individual (`name`) as a random effect because there was a single `morph` for each.
 
@@ -2028,18 +2046,22 @@ Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` o
 round(coef(summary(glm(bin ~ cohort + period + morph, data=coden, 
                        family=binomial(link="logit")))), digits=4)
 
+# Calculate frequency of den sharing per individual
 sharing <- coden %>%
   group_by(name, cohort, period, morph, coden) %>%
   summarise(frequency=n())
 
+# Calculate frequency of den sharing per cohort
 sharing %>%
   group_by(cohort, coden) %>%
   summarise(frequency=sum(frequency))
 
+# Calculate frequency of den sharing per period
 sharing %>%
   group_by(period, coden) %>%
   summarise(frequency=sum(frequency))
 
+# Calculate probability of den sharing
 sharing_plot <- sharing %>%
   spread(coden, frequency) %>%
   mutate(probability=(`Den shared`/sum(`Den shared`, Alone))) %>%
@@ -2117,6 +2139,159 @@ jpeg(file="figures/interaction by fixed effects.jpeg",
      width=4500, height=1500, units="px", res=500)
 print(interact_plot)
 dev.off()
+```
+
+```{r, include=FALSE}
+# Model table
+
+# Distance travelled per night
+mod <- lmer(distance_night ~ (cohort*period) + morph +
+              (1|name) + (1|day) + (1|precip) + (1|min_temp) + 
+              (1|moon), data=model_data)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value
+summary(mod) #random effects
+
+# Home range
+mod <- lmer(home_range ~ (cohort*period) + morph + 
+              (1|name) + (1|day) + (1|precip) + (1|min_temp) + (1|moon),
+            data=ranges_data)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+# Core range
+mod <- lmer(core_range ~ (cohort*period) + morph + 
+              (1|name) + (1|day) + (1|precip) + (1|min_temp) + (1|moon),
+            data=ranges_data)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+# Conspecific overlap
+mod <- glm(home_overlap ~ cohort + morph, data=overlap)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- glm(core_overlap ~ cohort + morph, data=overlap)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+# Nocturnal activity
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=woodland)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=forest)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=regrowth)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=grassland)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(overstory ~ cohort*period + morph + (1|name), data=noc_lidar)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(understory ~ cohort*period + morph + (1|name), data=noc_lidar)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(aspect ~ cohort*period + morph + (1|name), data=noc_lidar)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+# Diurnal denning
+
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=woodland)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=forest)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=regrowth)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(percentage ~ cohort*period + morph + (1|name), data=grassland)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(overstory ~ cohort*period + morph + (1|name), data=diu_lidar)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(understory ~ cohort*period + morph + (1|name), data=diu_lidar)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- lmer(aspect ~ cohort*period + morph + (1|name), data=diu_lidar)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- glm(raster_units ~ type, data=lidar_os)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- glm(raster_units ~ type, data=lidar_us)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+mod <- glm(raster_units ~ type, data=lidar_as)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+summary(mod) #random effects
+
+# Proximity index
+mod <- glm(prox ~ cohort*period + morph, data=interact)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+
+# Pearson correlation coefficient
+mod <- glm(cr ~ cohort*period + morph, data=interact)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+
+# Coefficient of sociality
+mod <- glm(cs.Cs ~ cohort*period + morph, data=interact)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+
+# Coefficient of association
+mod <- glm(ca ~ cohort*period + morph, data=interact)
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
+
+# Probability of den sharing
+mod <- glm(bin ~ cohort + period + morph, data=coden, 
+           family=binomial(link="logit"))
+anova(mod) #F-value
+car::Anova(mod) #chisq + p-value, 
 ```
 
 # ⚠️**Animation**
