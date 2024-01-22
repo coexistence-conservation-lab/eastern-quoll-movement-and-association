@@ -39,10 +39,11 @@ First, we installed the [pacman Package Management Tool](https://cran.r-project.
 
 ```{r}
 # Install and load required packages
-pacman::p_load(adehabitatHR, adehabitatLT, brglm, corrplot, data.table,
-               dplyr, ggplot2, ggpmisc, ggpubr, ggspatial, grid,
-               gridExtra, gtools, janitor, lme4, lubridate, MuMIn,
-               plotrix, raster, readxl, rgdal, RODBC, scales, sf, 
+pacman::p_load(adehabitatHR, adehabitatLT, AICcmodavg, brglm,
+               corrplot, data.table, dplyr, ggplot2, ggpmisc,
+               ggpubr, ggspatial, grid, gridExtra, gtools,
+               janitor, lme4, lubridate, MuMIn, plotrix, 
+               raster, readxl, rgdal, RODBC, scales, sf, 
                sp, tidyr, tidyverse, viridis, wildlifeDI)
 ```
 
@@ -190,10 +191,21 @@ Note that while `Altitude` also had a significant effect, this is because the ar
 
 ```{r}
 # Print model summary statistics for inside/outside fix predictors
-round(coef(summary(glm(fence ~ duration + temp + 
-                       dop + satellites, 
-                       family=binomial(link=logit), 
-                    data=coords_annotated))), digits=4)
+mod_null <- glm(fence ~ 1, family=binomial(link=logit), 
+                data=coords_annotated)
+
+mod_cov <- glm(fence ~ duration + temp + dop + satellites, 
+               family=binomial(link=logit), 
+               data=coords_annotated)
+
+# Calculate AIC of each model
+aictab(cand.set = list(mod_null, mod_cov), 
+       modnames = c('Null', 'Covariates'))
+
+
+anova(mod_cov)
+car::Anova(mod_cov)
+summary(mod_cov)
 ```
 
 All four variables significantly predicted whether a point was inside or outside the fence, so we boxplotted each variable to determine whether points inside where generally higher or lower for each variable.
