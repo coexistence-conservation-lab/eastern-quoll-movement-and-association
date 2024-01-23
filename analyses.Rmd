@@ -1,7 +1,7 @@
 ---
 title: "Everybody needs good neighbours: movement and conspecific association in a reintroduced mesopredator"
 author: "Wilson B A, Evans M J, Rapley S, Gordon I J, Wimpenny C, Newport J, & Manning A D"
-date: "30 September 2023"
+date: "January 23, 2023"
 output:
   html_document:
     toc: true
@@ -161,7 +161,7 @@ mfws <- readOGR(dsn="shapefiles/mfws_fence.shp", verbose=FALSE) %>%
 
 # Plot coordinates 
 ggplot() + 
-  geom_path(mfws, mapping=aes(x=long, y=lat, group=group), col="grey15") +
+  geom_path(mfws, mapping=aes(x=long, y=lat, group=group), col="grey30") +
   geom_point(coords_annotated, 
              mapping=aes(x=easting, y=northing, col=fence), alpha=0.6) +
   coord_sf(xlim=c(695750, 699250), ylim=c(6104250, 6107750)) +
@@ -211,40 +211,54 @@ summary(mod_cov)
 All four variables significantly predicted whether a point was inside or outside the fence, so we boxplotted each variable to determine whether points inside where generally higher or lower for each variable.
 
 ```{r, warning=FALSE, fig.align="center", fig.width=9, fig.height=6}
-duration <- ggplot() + 
-  geom_boxplot(coords_annotated, 
-               mapping=aes(x=fence, y=duration, fill=fence), 
-               col="grey15", alpha=0.8) +
+duration <- ggplot(coords_annotated, 
+                   mapping=aes(x=fence, y=duration, fill=fence, col=fence)) + 
+  geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+               shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) + 
+  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Duration (seconds)")
 
-temperature <- ggplot() + 
-  geom_boxplot(coords_annotated, mapping=aes(x=fence, y=temp, fill=fence), 
-               col="grey15", alpha=0.8) +
+temperature <- ggplot(coords_annotated, 
+                      mapping=aes(x=fence, y=temp, fill=fence)) + 
+  geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+               shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) +
+  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Temperature (Celsius)")
 
-hdop <- ggplot() + 
-  geom_boxplot(coords_annotated, mapping=aes(x=fence, y=dop, fill=fence), 
-               col="grey15", alpha=0.8) +
+hdop <- ggplot(coords_annotated, mapping=aes(x=fence, y=dop, fill=fence)) +
+  geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+               shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) +
+  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Horizontal dilution \nof precision")
 
-satellites <- ggplot() + 
-  geom_boxplot(coords_annotated, 
-               mapping=aes(x=fence, y=satellites, fill=fence), col="grey15", alpha=0.8) +
+satellites <- ggplot(coords_annotated, 
+                     mapping=aes(x=fence, y=satellites, fill=fence)) +
+  geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+               shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
         panel.background=element_rect(fill="white")) +
+  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Number of satellites")
 
@@ -256,8 +270,8 @@ covariates
 ```
 
 ```{r, include=FALSE}
-ggsave(filename="figures/data curation boxplots.jpeg", 
-       covariates, width=200, height=100, units="mm")
+ggsave(filename="figures/Fig 0 (data curation).tiff", 
+       covariates, height=125, width=150, units="mm")
 ```
 
 Based on this exploration, we filtered fixes that were in the first or third quartile for the 'inside' fixes, as follows:
@@ -426,8 +440,11 @@ Finally, we plot mean distance across all individuals since no fixed effects wer
 ```{r, fig.align="center", fig.width=4, fig.height=3}
 dist_plot <- ggplot(data=distance_night, 
                       aes(x=period, y=as.numeric(distance))) +
-  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=6, label="a)", fontface="bold", size=6) +
+  geom_violin(aes(fill=period), col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(col="grey30", fill="grey30", width=0.04, lwd=0.6) +
+  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+               shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=6, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
@@ -760,7 +777,7 @@ hr_cr_lookup <- rbind(hr_lookup, cr_lookup) %>%
 ```{r}
 # Map
 hr_cr_map <- ggplot(hr_cr_lookup) +
-  geom_path(mfws, mapping=aes(x=long, y=lat), col="grey15") +
+  geom_path(mfws, mapping=aes(x=long, y=lat), col="grey30") +
   geom_sf(aes(fill=id, col=id), alpha=0.2) + 
   coord_sf(xlim=c(695750, 699505), ylim=c(6104500, 6107675)) +
   annotation_scale(style="ticks", tick_height=0.5,
@@ -784,13 +801,12 @@ hr_cr_map <- ggplot(hr_cr_lookup) +
   scale_colour_viridis(discrete=T, option="D", begin=1, end=0) +
   facet_grid(range_type ~ cohort, switch = 'y') +
   xlab("") + ylab("")
-
 print(hr_cr_map)
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/ranges map by cohort and type.jpeg", 
-     width=3000, height=2650, units="px", res=500)
+tiff(file="figures/Fig 3 (ranges map).tiff", 
+     height=1500, width=1700, units="px", res=300)
 hr_cr_map
 dev.off()
 ```
@@ -887,12 +903,19 @@ On average, resident home ranges overlapped by 45.99 ha (±4.15) and core ranges
 Finally, we plotted the significant differences in home range and home range overlap by cohort and study night.
 
 ```{r, fig.align="center", fig.width=6, fig.height=3}
-# Boxplot
+# Set position dodge value for plotting
+pos=position_dodge(0.9)
+
+# Create boxplot
 home_period <- ggplot(data=ranges_model, 
                       aes(x=period, y=as.numeric(home_range))) +
-  geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=600, label="b)", 
-           fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=cohort), 
+              col="grey30", alpha=0.7, width=1.1, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=cohort), 
+               fill="grey30", width=0.04, lwd=0.6) +
+  stat_summary(position=pos, aes(col=cohort), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=600, label="b)", fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
@@ -900,34 +923,41 @@ home_period <- ggplot(data=ranges_model,
         axis.line=element_line(colour="black"),
         axis.ticks.x=element_blank(),
         axis.ticks.y=element_blank(),
-        legend.position=c(0.80, 0.8), 
-        legend.key = element_rect(fill = NA),
+        legend.position=c(0.2, 0.8), 
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=7), 
+        legend.key = element_rect(fill=NA),
+        legend.key.height = unit(0.5, 'cm'),
+        legend.key.width = unit(0.5, 'cm'),
         legend.background=element_blank()) +
+  scale_colour_manual(values=c("grey30","grey30")) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("Study period") + ylab("Home range (hectares)") +
-  labs(fill="Cohort")
+  labs(fill="Cohort") + guides(colour="none")
 print(home_period)
 
 # Regression plot
 home_time <- ggplot(data=ranges_data, aes(x=night_12hr, 
                                           y=as.numeric(home_range))) +
-  geom_smooth(method='lm', aes(fill=cohort, col=cohort), 
-              alpha=0.5) +
-  annotate(geom="text", x=50, y=300, label="c)", 
-           fontface="bold", size=6) +
+  geom_smooth(method='lm', aes(fill=cohort, col=cohort), lwd=0.8, alpha=0.5) +
+  #annotate(geom="text", x=50, y=300, label="c)", fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
         plot.margin=unit(c(0.1, 0, 0, 0.2), "cm"),
-        legend.position=c(0.20, 0.8),
+        legend.position=c(0.2, 0.8),
         axis.line=element_line(colour="black"),
         axis.ticks.x=element_blank(),
         axis.ticks.y=element_blank(),
-        strip.background=element_rect(colour="black", fill="grey15"), 
+        strip.background=element_rect(colour="black", fill="grey30"), 
         strip.text=element_text(colour="white"), 
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=7), 
         legend.key = element_rect(fill = NA), 
+        legend.key.height = unit(0.5, 'cm'),
+        legend.key.width = unit(0.5, 'cm'),
         legend.background=element_blank()) +
-  scale_colour_manual(values=viridis(2, begin=0.9, end=0.1)) +
+  scale_colour_manual(values=c("grey30","grey30")) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("Study night") + ylab("Home range (hectares)") +
   labs(fill="Cohort", col="Cohort")
@@ -936,9 +966,13 @@ print(home_time)
 # Boxplot
 home_overlap_plot <- ggplot(overlap, aes(x=cohort, 
                                          y=as.numeric(home_overlap))) +
-  geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=250, label="d)", 
-           fontface="bold", size=6) + 
+  geom_violin(position=pos, aes(fill=cohort), 
+              col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=cohort), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=cohort), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=250, label="d)", fontface="bold", size=6) + 
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -947,6 +981,7 @@ home_overlap_plot <- ggplot(overlap, aes(x=cohort,
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank()) +
+  scale_colour_manual(values=c("grey30","grey30")) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("Cohort") + labs(fill="Cohort") +
   ylab(expression(paste("Home range overlap (hectares)")))
@@ -960,8 +995,8 @@ dist_ranges_plots <- ggarrange(dist_plot, home_period,
                          ncol=2, nrow=2, widths=c(3,3,3,3))
 print(dist_ranges_plots)
 
-jpeg(file="figures/distance and ranges by fixed effects.jpeg", 
-     width=3500, height=2500, units="px", res=500)
+tiff(file="figures/Fig 2a–d (distance and ranges).tiff", 
+     height=1550, width=2100, units="px", res=300)
 dist_ranges_plots
 dev.off()
 ```
@@ -1059,7 +1094,7 @@ diu_model <- left_join(diu_period, diu_total) %>%
 Here we investigated eastern quoll nocturnal activity (GPS fixes) and diurnal denning (VHF fixes), in terms of habitat type (NVIS polygons) and habitat attributes (LiDAR rasters).
 
 Firstly, we used the [National Vegetation Information System (version 6.0)](http://www.environment.gov.au/fed/catalog/search/resource/details.page?uuid=%7Bab942d6d-9efd-4cf2-bec7-4c1521b83803%7D) major extant vegetation groups we created earlier ('Clip by MFWS fence' section) to create five broad habitat types relevant to MFWS. Below we visualised how the eight NVIS vegetation groups were aggregated into the five MFWS habitat types by **barplot** and **map**.
-  
+
 ```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=6}
 nvis_shp <- readOGR(dsn="shapefiles/mfws_nvis_vegetation_groups.shp") %>%
   spTransform(CRS("+proj=longlat +ellps=WGS84 +datum=WGS84")) 
@@ -1089,10 +1124,11 @@ nvis_groups <- nvis_groups %>%
                                "Aquatic"))) %>% arrange(-area)
 
 # Barplot
-nvis_barplot <- ggplot(nvis_groups, col="grey15",
+nvis_barplot <- ggplot(nvis_groups, col="grey30",
                        aes(x=nvis_habitat, y=area, fill=mfws_habitat)) + 
-  geom_col(size=0.5, col="grey15", alpha=0.8) +
+  geom_col(size=0.5, col="grey30", lwd=0.7, alpha=0.8) +
   geom_text(aes(label = paste0(round(perc, digits=1), "%"), vjust=-0.5)) +
+  #annotate(geom="text", x=8, y=2.0, label="a)", fontface="bold", size=6) +
   theme(axis.line.x = element_line(colour="black"),
         axis.line.y = element_line(colour="black"),
         legend.position = "none",
@@ -1114,9 +1150,10 @@ nvis_barplot <- ggplot(nvis_groups, col="grey15",
   scale_y_continuous(limits=c(0,2.2)) +
   labs(fill="MFWS habitat") +
   xlab("NVIS major vegetation group") + 
-  ylab(expression(paste("Area (", km^2, ")"))) +
-  annotate(geom="text", x=8, y=2.0, label="a)", fontface="bold", size=6)
-
+  ylab(expression(paste("Area (", km^2, ")")))
+```
+  
+```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=6}
 # Map plot
 nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp") %>%
   st_transform("EPSG:4326") %>% 
@@ -1128,11 +1165,12 @@ nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp") %>%
 
 nvis_mfws <- ggplot() + 
   geom_sf(st_zm(nvis), mapping=aes(fill=mfws_name), 
-          col="grey15", alpha=0.8) + 
+          col="grey30", lwd=0.5, alpha=0.8) + 
   annotation_scale(style="ticks", tick_height=0.5,
                    width_hint=0.3, 
                    pad_x=unit(1.55, "cm"),
                    pad_y=unit(0, "cm")) +
+  #annotate(geom="text", y=-35.157, x=149.186, label="b)", fontface="bold", size=6)
   theme(axis.line.x = element_blank(),
         axis.line.y = element_blank(),
         legend.position = c(0.75, 0.15),
@@ -1152,19 +1190,17 @@ nvis_mfws <- ggplot() +
         axis.text.y = element_blank(),
         axis.text.x = element_blank()) +
   scale_fill_manual(values=viridis(5, begin=0.9, end=0.1)) +
-  labs(fill="MFWS habitat", x=NULL, y=NULL) +
-  annotate(geom="text", y=-35.157, x=149.186, 
-           label="b)", fontface="bold", size=6)
-nvis_mfws
+  labs(fill="MFWS habitat", x=NULL, y=NULL) 
+print(nvis_mfws)
 
 nvis_methods <- ggarrange(nvis_barplot, nvis_mfws, 
                           ncol=2, nrow=1, widths=c(4.75, 3))
-nvis_methods
+print(nvis_methods)
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/nvis habitat type barplot and map.jpeg", 
-     width=5000, height=2000, units="px", res=500)
+tiff(file="figures/Fig 1a–b (habitat type and map).tiff", 
+     width=3000, height=1250, units="px", res=300)
 print(nvis_methods)
 dev.off()
 ```
@@ -1660,11 +1696,10 @@ Finally, we plot frequency of fixes (with percentages) adjusted for habitat avai
 ```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=3}
 noc_nvis_plot <- ggplot(noc_plot, 
                         aes(x=mfws_habitat, y=freq_adj,
-                            fill=mfws_habitat), col="grey15") + 
-  geom_col(size=0.5, col="grey15", alpha=0.8) +
+                            fill=mfws_habitat), col="grey30") + 
+  geom_col(size=0.5, col="grey30", alpha=0.8) +
   geom_text(aes(label = paste0(round(perc_adj, digits=1), "%"), vjust=-0.5)) +
-  annotate(geom="text", x=1, y=1500, label="a)", 
-           fontface="bold", size=6) +
+  #annotate(geom="text", x=1, y=1500, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_blank(),
@@ -1679,16 +1714,18 @@ noc_nvis_plot <- ggplot(noc_plot,
         axis.line.y = element_line(colour="black")) +
   scale_fill_manual(values=viridis(4, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) +
-  ggtitle("Nocturnal activity") + xlab("") + 
+  scale_y_continuous(limits=c(0, 1500)) +
+  ggtitle("Nocturnal activity") + xlab("") +
   ylab(expression(paste("Adjusted frequency (per ", km^2, ")"))) 
 print(noc_nvis_plot)
 
 diu_nvis_plot <- ggplot(diu_plot, 
                         aes(x=mfws_habitat, y=freq_adj,
-                            fill=mfws_habitat), col="grey15") + 
-  geom_col(size=0.5, col="grey15", alpha=0.8) +
+                            fill=mfws_habitat), col="grey30") + 
+  geom_col(size=0.5, col="grey30", alpha=0.8) +
   geom_text(aes(label = paste0(round(perc_adj, digits=1), 
                                "%"), vjust=-0.5)) +
+  #annotate(geom="text", x=1, y=150, label="b)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_blank(),
@@ -1703,8 +1740,8 @@ diu_nvis_plot <- ggplot(diu_plot,
         axis.line.y = element_line(colour="black")) +
   scale_fill_manual(values=viridis(4, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) +
-  ggtitle("Diurnal denning") + xlab("") + ylab("") +
-  annotate(geom="text", x=1, y=150, label="b)", fontface="bold", size=6)
+  scale_y_continuous(limits=c(0, 150)) +
+  ggtitle("Diurnal denning") + xlab("") + ylab("")
 print(diu_nvis_plot)
 
 nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot, 
@@ -1714,8 +1751,8 @@ nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot,
 ```
 
 ```{r, include=FALSE}
-jpeg(file="figures/nvis habitat type frequency.jpeg", 
-     width=3500, height=1750, units="px", res=500)
+tiff(file="figures/Fig 4a–b (habitat type frequency).tiff", 
+     width=2100, height=1000, units="px", res=300)
 print(nvis_plot)
 annotate_figure(nvis_plot, bottom=textGrob("MFWS habitat", gp=gpar(cex=1)))
 dev.off()
@@ -1729,8 +1766,13 @@ lidar_us <- subset(lidar_plot, raster=="Understory")
 lidar_as <- subset(lidar_plot, raster=="Aspect")
 
 lidar_os_plot <- ggplot(data=lidar_os, aes(x=type, y=raster_units)) +
-  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +  
-  annotate(geom="text", x=0.7, y=72, label="a)", fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=type), 
+              col="grey30", alpha=0.7, width=1.25, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=type), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=type), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=72, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1738,6 +1780,7 @@ lidar_os_plot <- ggplot(data=lidar_os, aes(x=type, y=raster_units)) +
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
         legend.position = "none") +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
   xlab("") + ylab("Overstory layer cover (%)")
@@ -1745,8 +1788,13 @@ print(lidar_os_plot)
 
 lidar_us_plot <- ggplot(data=lidar_us, 
                          aes(x=type, y=raster_units)) +
-  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=39, label="b)", fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=type), 
+              col="grey30", alpha=0.7, width=1.25, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=type), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=type), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=39, label="b)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1754,14 +1802,20 @@ lidar_us_plot <- ggplot(data=lidar_us,
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
         legend.position = "none") +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
   xlab("") + ylab("Understory layer cover (%)")
 print(lidar_us_plot)
 
 lidar_as_plot <- ggplot(data=lidar_as, aes(x=type, y=raster_units)) +
-  geom_boxplot(aes(fill=type), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=355, label="c)", fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=type), 
+              col="grey30", alpha=0.7, width=1.2, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=type), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=type), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=355, label="c)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1769,6 +1823,7 @@ lidar_as_plot <- ggplot(data=lidar_as, aes(x=type, y=raster_units)) +
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
         legend.position = "none") +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
   xlab("") + ylab("Aspect (degrees)")
@@ -1780,9 +1835,13 @@ Plot understory and aspect by period.
 ```{r}
 lidar_us_period_noc <- ggplot(data=noc_lidar, 
                               aes(x=period, y=understory*100)) +
-  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=30, label="d)", 
-           fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=period), 
+              col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=period), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=30, label="d)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1791,19 +1850,23 @@ lidar_us_period_noc <- ggplot(data=noc_lidar,
         axis.ticks.y = element_blank(),
         plot.title = element_text(hjust = 0.5),
         legend.position = "none",
-        strip.background = element_rect(colour="black", fill="grey15"), 
+        strip.background = element_rect(colour="black", fill="grey30"), 
         strip.text = element_text(colour="white")) +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Understory layer cover (%)") +
-  ggtitle("Nocturnal activity")
+  xlab("Study period") + ylab("Understory layer cover (%)")
 print(lidar_us_period_noc)
 
 lidar_as_period_noc <- ggplot(data=noc_lidar, 
                               aes(x=period, y=aspect)) +
-  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=350, label="e)", 
-           fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=period), 
+              col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=period), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=350, label="e)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1812,17 +1875,21 @@ lidar_as_period_noc <- ggplot(data=noc_lidar,
         axis.ticks.y = element_blank(),
         plot.title = element_text(hjust = 0.5),
         legend.position = "none") +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Aspect (degrees)") +
-  ggtitle("Nocturnal activity")
+  xlab("Study period") + ylab("Aspect (degrees)")
 print(lidar_as_period_noc)
 
 lidar_os_period_diu <- ggplot(data=diu_lidar, 
                               aes(x=period, y=overstory*100)) +
-  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=55, label="f)", 
-           fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=period), 
+              col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=period), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=55, label="f)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1831,17 +1898,21 @@ lidar_os_period_diu <- ggplot(data=diu_lidar,
         axis.ticks.y = element_blank(),
         plot.title = element_text(hjust = 0.5),
         legend.position = "none") +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Overstory layer cover (%)") +
-  ggtitle("Diurnal denning")
+  xlab("Study period") + ylab("Overstory layer cover (%)")
 print(lidar_os_period_diu)
 
 lidar_as_period_diu <- ggplot(data=diu_lidar, 
                           aes(x=period, y=aspect)) +
-  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=350, label="g)", 
-           fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=period), 
+              col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=period), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=350, label="g)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1850,37 +1921,45 @@ lidar_as_period_diu <- ggplot(data=diu_lidar,
         axis.ticks.y = element_blank(),
         plot.title = element_text(hjust = 0.5),
         legend.position = "none") +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Aspect (degrees)") +
-  ggtitle("Diurnal denning")
+  xlab("Study period") + ylab("Aspect (degrees)")
 print(lidar_as_period_diu)
 ```
 
 ```{r, include=FALSE}
-lidar_avail_plots <- ggarrange(lidar_os_plot, lidar_us_plot, 
-                        lidar_as_plot, hjust=-0.1, vjust=1.5,
-                        nrow=1, ncol=3, widths=c(2,2,2), 
-                        label.x=0.89, label.y=0.99, 
-                        font.label=list(size=10, face="bold",
-                                        color="black"))
+# Combine plots a–c
+lidar_avail_plots_abc <- ggarrange(lidar_os_plot, lidar_us_plot, 
+                                   lidar_as_plot, hjust=-0.1, vjust=1.5, 
+                                   nrow=1, ncol=3, widths=c(2,2,2), 
+                                   label.x=0.89, label.y=0.99, 
+                                   font.label=list(size=10, face="bold", 
+                                                   color="black")) %>%
+    annotate_figure(top=text_grob("Availability", size=14))
 
-jpeg(file="figures/lidar habitat use by availability.jpeg", 
-     width=4500, height=1500, units="px", res=500)
-print(lidar_avail_plots)
-dev.off()
+# Combine plots d–e
+lidar_period_plots_de <- ggarrange(lidar_us_period_noc, lidar_as_period_noc,
+                        hjust=-0.1, vjust=1.5, nrow=1, ncol=2,
+                        widths=c(2,2), label.x=0.89, label.y=0.99, 
+                        font.label=list(size=10, face="bold", color="black")) %>%
+  annotate_figure(top=text_grob("Nocturnal activity", size=14))
 
-lidar_period_plots <- ggarrange(lidar_us_period_noc, lidar_as_period_noc,
-                        lidar_os_period_diu, lidar_as_period_diu,
-                        hjust=-0.1, vjust=1.5, nrow=2, ncol=2,
-                        widths=c(2,2,2,2), 
-                        label.x=0.89, label.y=0.99, 
-                        font.label=list(size=10, face="bold",
-                                        color="black"))
+# Combine plots f–g
+lidar_period_plots_fg <- ggarrange(lidar_os_period_diu, lidar_as_period_diu,
+                        hjust=-0.1, vjust=1.5, nrow=1, ncol=2,
+                        widths=c(2,2), label.x=0.89, label.y=0.99, 
+                        font.label=list(size=10, face="bold", color="black")) %>%
+  annotate_figure(top=text_grob("Diurnal denning", size=14))
 
-jpeg(file="figures/lidar habitat use by period.jpeg", 
-     width=4000, height=3000, units="px", res=500)
-print(lidar_period_plots)
+#Combine plots a–g
+lidar_plots_ag <- ggarrange(lidar_avail_plots_abc, 
+                                lidar_period_plots_de, 
+                                lidar_period_plots_fg, nrow=3)
+
+tiff(file="figures/Fig 5a–g (habitat attribute by period).tiff", 
+     height=2750, width=2500, units="px", res=300)
+print(lidar_plots_ag)
 dev.off()
 ```
 
@@ -2298,9 +2377,13 @@ Finally, we plot these significant results.
 ```{r, fig.align="center", fig.width=6, fig.height=3}
 pear_period_plot <- ggplot(data=interact, 
                            aes(x=period, y=as.numeric(cr))) +
-  geom_boxplot(aes(fill=morph), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=0.75, label="a)", 
-           fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=morph), 
+              col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=morph), 
+               fill="grey30", width=0.04, lwd=0.6) +
+  stat_summary(position=pos, aes(col=morph), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=0.75, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2308,20 +2391,29 @@ pear_period_plot <- ggplot(data=interact,
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position=c(0.73, 0.8), 
+        legend.position=c(0.2, 0.85), 
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=7),
         legend.key = element_rect(fill = NA), 
+        legend.key.height = unit(0.5, 'cm'),
+        legend.key.width = unit(0.5, 'cm'),
         legend.background=element_blank()) +
+  scale_colour_manual(values=c("grey30","grey30")) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
   xlab("Study period") + 
   ylab("Pearson correlation coefficient") +
-  labs(fill="Morph")
+  labs(fill="Morph") + guides(colour="none")
 print(pear_period_plot)
 
 soc_period_plot <- ggplot(data=interact, 
                           aes(x=period, y=as.numeric(cr))) +
-  geom_boxplot(aes(fill=period), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=0.75, label="b)", 
-           fontface="bold", size=6) + 
+  geom_violin(position=pos, aes(fill=period), 
+              col="grey30", alpha=0.7, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=period), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=0.75, label="b)", fontface="bold", size=6) + 
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2331,15 +2423,20 @@ soc_period_plot <- ggplot(data=interact,
         axis.ticks.y = element_blank(),
         legend.position = "none", 
         legend.background=element_blank()) +
+  scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
   xlab("Study period") + ylab("Coefficient of sociality") 
 print(soc_period_plot)
   
 coden_plot <- ggplot(data=sharing_plot, 
                       aes(x=period, y=as.numeric(probability))) +
-  geom_boxplot(aes(fill=cohort), col="grey15", alpha=0.8) +
-  annotate(geom="text", x=0.7, y=0.95, label="c)", 
-           fontface="bold", size=6) +
+  geom_violin(position=pos, aes(fill=cohort), 
+              col="grey30", alpha=0.7, width=1.45, lwd=0.6) +
+  geom_boxplot(position=pos, aes(col=cohort), 
+               fill="grey30", width=0.03, lwd=0.6) +
+  stat_summary(position=pos, aes(col=cohort), fun="median", geom="point", 
+               fill="white", shape=21, size=1.5, stroke=1) +
+  #annotate(geom="text", x=0.7, y=0.95, label="c)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2347,26 +2444,29 @@ coden_plot <- ggplot(data=sharing_plot,
         axis.line = element_line(colour="black"),
         axis.ticks.x = element_blank(),
         axis.ticks.y = element_blank(),
-        legend.position=c(0.66, 0.8), 
+        legend.position=c(0.61, 0.8), 
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=7), 
         legend.key = element_rect(fill = NA), 
+        legend.key.height = unit(0.5, 'cm'),
+        legend.key.width = unit(0.5, 'cm'),
         legend.background=element_blank()) +
+  scale_colour_manual(values=c("grey30","grey30")) +
   scale_fill_manual(values = viridis(2, begin=0.9, end=0.1)) +
   xlab("Study period") + ylab("Probability of den sharing") +
-  labs(fill="Cohort")
+  labs(fill="Cohort") + guides(colour="none")
 print(coden_plot)
 ```
 
 ```{r, include=FALSE}
 interact_plot <- ggarrange(pear_period_plot, soc_period_plot, 
-                           coden_plot, ncol=3, nrow=1, 
-                           label.x=0.89, widths=c(3,3,3),
-                           label.y=0.99, hjust=-0.1, vjust=1.5, 
-                           font.label=list(size=10, face="bold", 
-                                           color="black"))
+                           coden_plot, ncol=3, nrow=1, label.x=0.89, 
+                           widths=c(3,3,3), label.y=0.99, hjust=-0.1, vjust=1.5, 
+                           font.label=list(size=10, face="bold", color="black"))
 print(interact_plot)
 
-jpeg(file="figures/associations by fixed effects.jpeg", 
-     width=5500, height=1750, units="px", res=500)
+tiff(file="figures/Fig 6a–c (associations).tiff", 
+     width=3000, height=1000, units="px", res=300)
 print(interact_plot)
 dev.off()
 ```
