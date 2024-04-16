@@ -1001,94 +1001,6 @@ dist_ranges_plots
 dev.off()
 ```
 
-## ⚠️Den overlap
-
-Here we calculate the percentage of dens that occurred within each animal's core range (50% KUD).
-
-*Flag*
-
-```{r, eval=FALSE}
-pacman::p_load(data.table, readxl, sf, sp)
-
-diu <- read_excel(raw_data, sheet="dens") %>% 
-  clean_names() %>% na.omit() %>%
-  mutate(easting=as.numeric(easting), 
-         northing=as.numeric(northing), 
-         date=as.POSIXct(date_tracked), 
-         day=as.numeric(yday(date)), #day of the year variable
-         night=(as.numeric(yday(date)) - 157), #night variable)
-         period=ifelse(night >=3 & night <=21, 'Baseline', 
-                ifelse(night >=22 & night <=32, 'Release',
-                ifelse(night >=33 & night <=52, 'Settlement', NA)))) %>%
-  # Remove irrelevant dates
-  subset(night >=3 & night <=52) %>%
-  subset(ifelse(cohort=="Resident", night <=32, night >=22))
-
-diu_sp <- SpatialPointsDataFrame( #library(sp)
-  data.frame(diu$easting, diu$northing), diu,
-  proj4string=CRS("EPSG:32755")) %>% 
-  st_as_sf()
-
-#want to label points as inside the core range of their respective quoll
-diu_core <- st_join(diu_sp, core_range, join=st_intersects) %>%
-  st_drop_geometry()
-```
-
-For identifying inside and outside locations:
-
-```{r, eval=FALSE}
-coords_filt <- st_filter(coords_sp, mf_fence) #filter fixes to inside MF fence
-
-nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp", quiet=TRUE) %>%
-  st_transform("EPSG:4326")
-
-nvis_info <- read.csv("shapefiles/mfws_nvis_vegetation_groups.csv") %>%
-  clean_names() %>%
-  dplyr::select(c(id, nvis_habitat=mvg_name, mfws_habitat=mfws_name))
-
-coords_annotated <- coords_sp %>% #annotate polygon info to coords
-  mutate(id=as.numeric(st_intersects(coords_sp, nvis))) %>%
-  st_drop_geometry() %>% 
-  left_join(nvis_info, by="id") %>%
-  mutate(fence=factor(ifelse(!is.na(mfws_habitat), 
-                             "Inside", "Outside"), 
-                      levels=c("Inside", "Outside")))
-```
-
-Prep for modelling:
-
-```{r, eval=FALSE}
-diu_adj <- diu_nvis %>%
-  group_by(mfws_habitat) %>% count() %>% 
-  mutate(freq=n, perc=(freq/413)*100) #adjusted by frequency of dens
-
-diu_plot <- diu_adj %>%  clean_names() %>%
-  left_join(mfws_group, by="mfws_habitat") %>%
-  mutate(freq_adj=freq/area, #adjusted by total area
-         perc_adj=(freq_adj/383.1) *100, #adjusted by total freq_adj
-         mfws_habitat=factor(mfws_habitat, 
-                             levels=c("Eucalypt woodland", 
-                                      "Eucalypt forest", 
-                                      "Regrowth", "Grassland",
-                                      "Aquatic")))
-#data for modelling
-diu_period <- diu_nvis %>%
-  group_by(cohort, period, morph, name, mfws_habitat) %>%
-  summarise(dens=length(mfws_habitat))
-
-diu_total <- diu_period %>%
-  group_by(cohort, period, morph, name) %>%
-  summarise(total=sum(dens))
-  
-diu_model <- left_join(diu_period, diu_total) %>%
-  mutate(percentage=(100/total)*dens, 
-         mfws_habitat=factor(mfws_habitat, 
-                             levels=c("Eucalypt woodland", 
-                                      "Eucalypt forest", 
-                                      "Regrowth", "Grassland",
-                                      "Aquatic")))
-```
-
 # **Habitat use**
 
 Here we investigated eastern quoll nocturnal activity (GPS fixes) and diurnal denning (VHF fixes), in terms of habitat type (NVIS polygons) and habitat attributes (LiDAR rasters).
@@ -2304,18 +2216,32 @@ coden <- read_excel(raw_data, sheet="dens") %>%
   subset(night >=3 & night <=52) %>% 
   subset(ifelse(cohort=="Resident", night <=32, night >=22)) %>%
   dplyr::select(name, morph, cohort, period, coden, eqd_code) %>%
-  mutate(bin = ifelse(coden=="Alone",0,1)) %>%
+  mutate(bin = ifelse(coden=="Alone", 0, 1)) %>%
   rename(den = eqd_code)
 
 # Calculate frequency of den use
-dens <- coden %>%
+coden %>%
   group_by(den) %>%
   summarise(frequency=n()) %>%
   group_by(frequency) %>%
   summarise(dens=n())
+
+# Determine the most frequented den
+megaden <- coden %>%
+  filter(coden == "Den shared") %>%
+  group_by(den) %>%
+  summarise(frequency=n()) %>%
+  filter(frequency == max(frequency))
+
+# Determine which quolls frequented this den
+coden %>%
+  filter(den == megaden$den) %>%
+  group_by(name, cohort) %>%
+  summarise(number=n()) %>%
+  arrange(number)
 ```
 
-Of the 51 unique den sites, we found that 13 dens were used once, 28 were used on 2-9 occasions, 9 were used on 10-39 occasions, and one den was used on 96 occasions. For three days in a row, this den was rested in by 5 collared eastern quolls at once.
+Of the 51 unique den sites, we found that 13 dens were used once, 28 were used on 2-9 occasions, 9 were used on 10-39 occasions, and one den (EQD-143) was used on 96 occasions. For three days in a row (Jul 27–29), this den was rested in by 5 collared eastern quolls at once (3 residents, 2 reinforcers).
 
 Next we use GLMMs to test the fixed effects of `cohort`, `period`, and `morph` on the probability of den sharing. We did not include individual (`name`) as a random effect because there was a single `morph` for each.
 
@@ -2652,7 +2578,7 @@ By following a [gganimate tutorial by Katherine Goode](https://goodekat.github.i
 
  ⚠️ *Currently not working*
 
-```{r, eval=FALSE}
+```{r, include=FALSE, eval=FALSE}
 pacman::p_load(gganimate, ggplot2, tidyverse, transformr)
 
 quoll_animation <- read.csv("processed data/coordinates curated.csv") %>%
