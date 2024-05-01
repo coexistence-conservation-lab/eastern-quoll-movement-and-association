@@ -1,7 +1,7 @@
 ---
 title: "Everybody needs good neighbours: movement and conspecific association in a reintroduced mesopredator"
 author: "Wilson B A, Evans M J, Rapley S, Gordon I J, Wimpenny C, Newport J, & Manning A D"
-date: "January 23, 2023"
+date: "May 1, 2024"
 output:
   html_document:
     toc: true
@@ -39,12 +39,7 @@ First, we installed the [pacman Package Management Tool](https://cran.r-project.
 
 ```{r}
 # Install and load required packages
-pacman::p_load(adehabitatHR, adehabitatLT, AICcmodavg, brglm,
-               corrplot, data.table, dplyr, ggplot2, ggpmisc,
-               ggpubr, ggspatial, grid, gridExtra, gtools,
-               janitor, lme4, lubridate, MuMIn, plotrix, 
-               raster, readxl, rgdal, RODBC, scales, sf, 
-               sp, tidyr, tidyverse, viridis, wildlifeDI)
+pacman::p_load(adehabitatHR, adehabitatLT, AICcmodavg, brglm, corrplot, data.table, dplyr, ggplot2, ggpmisc, ggpubr, ggspatial, grid, gridExtra, gtools, janitor, lme4, lubridate, MuMIn, plotrix, raster, readxl, rgdal, RODBC, scales, sf, sp, tidyr, tidyverse, viridis, wildlifeDI)
 ```
 
 # **Data curation**
@@ -55,7 +50,7 @@ Firstly, we load the required packages and read in our GPS coordinate and enviro
 
 ```{r, results='hide', warning=FALSE, message=FALSE}
 # Assign raw data filename to an object
-raw_data <- "data.xlsx"
+raw_data <- "input/data.xlsx"
 
 # Read in GPS data
 gps <- read_excel(raw_data, sheet="coordinates") %>% 
@@ -84,14 +79,20 @@ coords <- coords %>%
   # Create day of the year variable (1-365)
   mutate(day_12hr = as.numeric(yday(date_12hr))) %>%
   # Create study night variable (3-52)
-  mutate(night_12hr = (as.numeric(yday(date_12hr)) - 157)) %>% 
+  mutate(night_12hr = (as.numeric(yday(date_12hr))-157)) %>% 
   # Remove irrelevant dates  
   subset(night_12hr >=3 & night_12hr <=52) %>%
-  mutate(period=ifelse(night_12hr >=3 & night_12hr <=21, 'Baseline', 
-                ifelse(night_12hr >=22 & night_12hr <=32, 'Release',
-                ifelse(night_12hr >=33 & night_12hr <=52, 'Settlement', NA)))) %>%
-  subset(ifelse(cohort=="Resident", night_12hr <=32, night_12hr >=22))
-#sort(unique(coords$night_12hr)) #output should range 3-52 nights
+  mutate(period=ifelse(night_12hr >=3 & night_12hr <=21, 
+                       'Baseline', 
+                ifelse(night_12hr >=22 & night_12hr <=32, '
+                       Release',
+                ifelse(night_12hr >=33 & night_12hr <=52, 
+                       'Settlement', NA)))) %>%
+  subset(ifelse(cohort=="Resident", night_12hr <=32, 
+                night_12hr >=22))
+
+# Display range of study nights (should be range 3–52)
+sort(unique(coords$night_12hr)) 
 ```
 
 Errors can be present in animal locations when GPS fixes are missing or coordinates are erroneous, and these must be screened prior to analyses. For example, a quoll denning underground will limit the ability of the GPS to communicate with satellites, leading to error. 
@@ -117,7 +118,7 @@ coords_l <- subset(coords_t, longitude!=0) %>%
 Next, we use the [National Vegetation Information System (version 6.0)](http://www.environment.gov.au/fed/catalog/search/resource/details.page?uuid=%7Bab942d6d-9efd-4cf2-bec7-4c1521b83803%7D) major extant vegetation groups polygon (adapted for MFWS, see Habitat use section) to classify points as **inside** or **outside** the sanctuary.
 
 ```{r, message=FALSE}
-mf_fence <- st_read("shapefiles/mfws_fence.shp", quiet=TRUE) %>%
+mf_fence <- st_read("input/mfws_fence.shp", quiet=TRUE) %>%
   # Set projection using sf
   st_set_crs("EPSG:32755") %>%
   st_transform("EPSG:4326")
@@ -130,13 +131,14 @@ coords_sp <- SpatialPointsDataFrame(
 # Filter fixes to those inside MFWS
 coords_filt <- st_filter(coords_sp, mf_fence) 
 
-nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp", 
+nvis <- st_read("input/mfws_nvis_vegetation_groups.shp", 
                 quiet=TRUE) %>%
   st_transform("EPSG:4326")
 
-nvis_info <- read.csv("shapefiles/mfws_nvis_vegetation_groups.csv") %>%
+nvis_info <- read.csv("input/mfws_nvis_vegetation_groups.csv") %>%
   clean_names() %>%
-  dplyr::select(c(id, nvis_habitat=mvg_name, mfws_habitat=mfws_name))
+  dplyr::select(c(id, nvis_habitat=mvg_name, 
+                  mfws_habitat=mfws_name))
 
 # Annotate polygon data to GPS df
 coords_annotated <- coords_sp %>% 
@@ -151,20 +153,24 @@ coords_annotated <- coords_sp %>%
 We checked this worked by mapping the coordinates.
 
 ```{r, message=FALSE, fig.align="center"}
-mfws <- readOGR(dsn="shapefiles/mfws_fence.shp", verbose=FALSE) %>%
+# Read in MFWS shapefile
+mfws <- readOGR(dsn="input/mfws_fence.shp", verbose=FALSE) %>%
   # Set projection using rgdal
   spTransform(CRS("+proj=utm +zone=55 +datum=WGS84")) %>%
-  # Transform 
-  fortify(verbose=FALSE) %>% #transforms from from sp to dataframe
+  # Transform from from sp to df
+  fortify(verbose=FALSE) %>% 
   mutate(lat=as.numeric(lat + 10000000), 
          long=as.numeric(long))
 
 # Plot coordinates 
 ggplot() + 
-  geom_path(mfws, mapping=aes(x=long, y=lat, group=group), col="grey30") +
+  geom_path(mfws, mapping=aes(x=long, y=lat, 
+                              group=group), col="grey30") +
   geom_point(coords_annotated, 
-             mapping=aes(x=easting, y=northing, col=fence), alpha=0.6) +
-  coord_sf(xlim=c(695750, 699250), ylim=c(6104250, 6107750)) +
+             mapping=aes(x=easting, y=northing, 
+                         col=fence), alpha=0.6) +
+  coord_sf(xlim=c(695750, 699250), 
+           ylim=c(6104250, 6107750)) +
   theme(panel.grid.major=element_blank(), 
         panel.grid.minor=element_blank(),
         panel.border=element_blank(),
@@ -174,7 +180,8 @@ ggplot() +
         axis.ticks.x=element_blank(),
         axis.ticks.y=element_blank(),
         legend.key=element_blank()) +
-  scale_colour_manual(values=viridis(3, begin=0.9, end=0.1), name="Fence") +
+  scale_colour_manual(values=viridis(3, begin=0.9, 
+                                     end=0.1), name="Fence") +
   xlab("") + ylab("")
 ```
 
@@ -201,21 +208,20 @@ mod_cov <- glm(fence ~ duration + temp + dop + satellites,
 # Calculate AIC of each model
 aictab(cand.set = list(mod_null, mod_cov), 
        modnames = c('Null', 'Covariates'))
-
-
-anova(mod_cov)
-car::Anova(mod_cov)
-summary(mod_cov)
 ```
 
 All four variables significantly predicted whether a point was inside or outside the fence, so we boxplotted each variable to determine whether points inside where generally higher or lower for each variable.
 
 ```{r, warning=FALSE, fig.align="center", fig.width=9, fig.height=6}
+# Plot frequency of coordinates inside/outside MFWS
 duration <- ggplot(coords_annotated, 
-                   mapping=aes(x=fence, y=duration, fill=fence, col=fence)) + 
+                   mapping=aes(x=fence, y=duration, 
+                               fill=fence, col=fence)) + 
   geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
-  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
-  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+  geom_boxplot(col="grey30", fill="grey30", 
+               width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", 
+               col="grey30", fill="white", 
                shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
@@ -224,11 +230,14 @@ duration <- ggplot(coords_annotated,
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Duration (seconds)")
 
+# Plot frequency of coordinates inside/outside MFWS
 temperature <- ggplot(coords_annotated, 
                       mapping=aes(x=fence, y=temp, fill=fence)) + 
   geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
-  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
-  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+  geom_boxplot(col="grey30", fill="grey30", 
+               width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", 
+               col="grey30", fill="white", 
                shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
@@ -237,10 +246,14 @@ temperature <- ggplot(coords_annotated,
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Temperature (Celsius)")
 
-hdop <- ggplot(coords_annotated, mapping=aes(x=fence, y=dop, fill=fence)) +
+# Plot frequency of coordinates inside/outside MFWS
+hdop <- ggplot(coords_annotated, mapping=aes(x=fence, y=dop, 
+                                             fill=fence)) +
   geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
-  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
-  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+  geom_boxplot(col="grey30", fill="grey30", 
+               width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", 
+               col="grey30", fill="white", 
                shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
@@ -249,11 +262,15 @@ hdop <- ggplot(coords_annotated, mapping=aes(x=fence, y=dop, fill=fence)) +
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Horizontal dilution \nof precision")
 
+# Plot frequency of coordinates inside/outside MFWS
 satellites <- ggplot(coords_annotated, 
-                     mapping=aes(x=fence, y=satellites, fill=fence)) +
+                     mapping=aes(x=fence, y=satellites, 
+                                 fill=fence)) +
   geom_violin(col="grey30", alpha=0.7, lwd=0.6) +
-  geom_boxplot(col="grey30", fill="grey30", width=0.02, lwd=0.5) +
-  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+  geom_boxplot(col="grey30", fill="grey30", 
+               width=0.02, lwd=0.5) +
+  stat_summary(fun="median", geom="point", 
+               col="grey30", fill="white", 
                shape=21, size=1.5, stroke=1) +
   theme(legend.position="none", 
         axis.line=element_line(colour="black"),
@@ -262,15 +279,19 @@ satellites <- ggplot(coords_annotated,
   scale_fill_manual(values=viridis(2, begin=0.9, end=0.1)) +
   xlab("") + ylab("Number of satellites")
 
+# Combine plots
 covariates <- ggarrange(duration, temperature, hdop, satellites, 
                         ncol=2, nrow=2, hjust=-0.1, vjust=1.5,
                         label.x=0.89, label.y=0.99, #library(ggpubr)
-                        font.label=list(size=10, face="bold", color="black"))
-covariates
+                        font.label=list(size=10, face="bold", 
+                                        color="black"))
+# Display combined plot
+print(covariates)
 ```
 
 ```{r, include=FALSE}
-ggsave(filename="figures/Fig 0 (data curation).tiff", 
+# Save plot to tiff
+ggsave(filename="output/Fig 0 (data curation).tiff", 
        covariates, height=125, width=150, units="mm")
 ```
 
@@ -284,6 +305,7 @@ Based on this exploration, we filtered fixes that were in the first or third qua
 After filtering the fixes by all eight variables, there were only 21 'outside' fixes left, which we removed manually.
 
 ```{r}
+# Subset coordinates to determine how many were removed by each threshold
 coords_d <- subset(coords_annotated, duration<=54)
 coords_c <- subset(coords_d, temp>=17)
 coords_h <- subset(coords_c, dop<=2.6)
@@ -291,12 +313,14 @@ coords_s <- subset(coords_h, satellites>=5)
 coords_f <- subset(coords_s, fence=="Inside") %>%
     mutate(cohort=factor(cohort, levels=c("Resident", "Reinforcer")))
 
-write.csv(coords_f, "processed data/coordinates curated.csv")
+# Save df as csv
+write.csv(coords_f, "output/coordinates curated.csv")
 ```
 
 Below is a tabulated summary of the fixes removed by each variable's threshold.
 
 ```{r, fig.align="center"}
+# Generate table of fixes removed by each threshold
 table <- data.frame("Variable"=c("Raw dataset", "Quoll", 
                                  "Deployment status",  
                                  "Animal in trap", "Longitude", 
@@ -343,10 +367,16 @@ We calculated the linear `distance` (metres) between consecutive locations divid
 ## **Data curation**
 
 ```{r}
-data <- read.csv("processed data/coordinates curated.csv")
-quolls <- unique(sort(data$name)) #vector of identities
+# Read in data
+data <- read.csv("output/coordinates curated.csv")
+
+# Create vector of quoll identities
+quolls <- unique(sort(data$name)) 
+
+# Create empty df for loop to populate
 distance_fix <- data.frame()
 
+# Loop calculating linear distance between locations for each quoll
 for(i in quolls){
   quolls <- subset(data, name==i)
   quolls$name <- factor(quolls$name) #converts to factor
@@ -372,6 +402,7 @@ for(i in quolls){
 Here we used distance per fix to calculate distance per night (adjusted for number of fixes), and combine the environmental data to use as random effects in our modelling.
 
 ```{r}
+# Calculate distance travelled per study night
 distance_night <- distance_fix %>% #distance per night
   mutate(distance = as.numeric(distance/1000), #gives kilometres
          night_12hr = as.numeric(night_12hr)) %>% 
@@ -383,16 +414,20 @@ distance_night <- distance_fix %>% #distance per night
          cohort = factor(cohort, levels=c("Resident","Reinforcer"))) %>%
   na.omit()
 
-data <- distance_night %>% na.omit() %>%
-  mutate(date_12hr = as.POSIXct(strptime(date_12hr, format="%Y-%m-%d",
+data <- distance_night %>% 
+  na.omit() %>%
+  mutate(date_12hr = as.POSIXct(strptime(date_12hr, 
+                                         format="%Y-%m-%d",
                                          tz="Australia/Sydney")))
 
+# Read in environmental covariates
 enviro <- read_excel(raw_data, sheet="environment") %>% 
   clean_names() %>%
   mutate(date_12hr = as.POSIXct(strptime(day, format="%Y-%m-%d"))) %>%
   subset(date_12hr>"2018-06-07" & date_12hr<"2018-07-31") %>%
   mutate_at(c(2:5), as.numeric)
 
+# Join coordinate and environmental dfs
 model_data <- as.data.frame(left_join(data, enviro, by="date_12hr"))
 ```
 
@@ -419,12 +454,14 @@ round(coef(summary(lmer(distance_night ~ morph + (period*cohort) +
 ## Summary statistics
 
 ```{r}
+# Print mean and standard error statistics
 data.frame(Measure=c("Distance per fix:", "Distance per night:"),
            Mean=c(mean(model_data$distance_fix), 
                   mean(model_data$distance_night)),
            SE=c(std.error(model_data$distance_fix), 
                 std.error(model_data$distance_night)))
 
+# Print mean and standard error statistics
 model_data %>%
   group_by(period) %>%
   summarise(mean=mean(distance_night), 
@@ -435,14 +472,18 @@ We found study period had a significant effect on the distances travelled per ni
 
 ## Plot
 
-Finally, we plot mean distance across all individuals since no fixed effects were significant.
+Finally, we plot mean distance by study period. 
 
 ```{r, fig.align="center", fig.width=4, fig.height=3}
+# Plot mean distances by study period
 dist_plot <- ggplot(data=distance_night, 
                       aes(x=period, y=as.numeric(distance))) +
-  geom_violin(aes(fill=period), col="grey30", alpha=0.7, lwd=0.6) +
-  geom_boxplot(col="grey30", fill="grey30", width=0.04, lwd=0.6) +
-  stat_summary(fun="median", geom="point", col="grey30", fill="white", 
+  geom_violin(aes(fill=period), col="grey30", 
+              alpha=0.7, lwd=0.6) +
+  geom_boxplot(col="grey30", fill="grey30", 
+               width=0.04, lwd=0.6) +
+  stat_summary(fun="median", geom="point", 
+               col="grey30", fill="white", 
                shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=6, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
@@ -469,7 +510,8 @@ We used the kernel utilisation distribution (KUD) model to calculate `home` rang
 ### Range per night
 
 ```{r}
-data <- read.csv("processed data/coordinates curated.csv") %>%
+# Read coordinates data
+data <- read.csv("output/coordinates curated.csv") %>%
   mutate(night_date=as.POSIXct(strptime(date_time_12hr, 
                                         format="%Y-%m-%d")))
 coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
@@ -477,10 +519,16 @@ coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting,
 ```
 
 ```{r, eval=FALSE}
+# Create vector of quoll identities
 quolls <- as.character(unique(coords$name))
+
+# Create vector of study nights
 days <- unique(strftime(coords[["night_date"]]))
+
+# Create empty df for loop to populate
 ranges <- data.frame()
 
+# Loop to calculate home and core ranges per night
 for (i in 1:length(quolls)) {
   for (j in 1:length(days)) {
     points <- subset(coords, name==quolls[i] & date==days[j], select=name)
@@ -495,57 +543,65 @@ for (i in 1:length(quolls)) {
       rename(home_range=V1, core_range=V2, name=V3, night_date=V4)
     print(out)
     ranges <- rbind.data.frame(ranges, out) }}
-write.csv(ranges, "processed data/raw ranges per day.csv")
+write.csv(ranges, "output/raw ranges per day.csv")
 ```
 
 ```{r}
-ranges_day <- read.csv("processed data/raw ranges per day.csv") %>% #format time
-  mutate(night_date=as.POSIXct(strptime(night_date, format="%Y-%m-%d",
+ranges_day <- read.csv("output/raw ranges per day.csv") %>%
+  mutate(night_date=as.POSIXct(strptime(night_date, 
+                                        format="%Y-%m-%d",
                                         tz="Australia/Sydney")))
 
-ranges_data <- data %>% #add day and night numbers
+# Create lookup table for study day and night numbers
+ranges_data <- data %>% 
   dplyr::select(night_date, night_12hr, day_12hr) %>%
   group_by(night_date, night_12hr, day_12hr) %>%
   summarise(n=length(night_12hr)) %>%
   merge(ranges_day, by="night_date") %>%
   dplyr::select(-n)
 
-#lookup table to add cohort and morph back in
-periods <- read.csv("processed data/coordinates curated.csv") %>%
+# Create lookup table to add cohort and morph back in
+periods <- read.csv("output/coordinates curated.csv") %>%
   group_by(cohort, period, morph, name) %>%
   summarise(fixes=length(name))
-study <- read.csv("processed data/coordinates curated.csv") %>%
+study <- read.csv("output/coordinates curated.csv") %>%
   group_by(cohort, morph, name) %>%
   summarise(fixes=length(name)) %>%
   mutate(period="Study")
 lookup <- bind_rows(periods, study)
 
-ranges_data <- ranges_data %>% #add study period
+# Add predictors into df
+ranges_data <- ranges_data %>% 
   mutate(period=ifelse(night_12hr <=19, 'Baseline', 
                 ifelse(night_12hr >=20 & night_12hr <=28, 'Release',
                 ifelse(night_12hr >=29, 'Settlement', NA)))) %>% 
-  merge(lookup, by=c("name","period")) #add cohort and morph
-write.csv(ranges_data,"processed data/ranges per day.csv")
+  merge(lookup, by=c("name","period")) 
+write.csv(ranges_data,"output/ranges per day.csv")
 ```
 
 ### Range per individual
 
 ```{r}
-data <- read.csv("processed data/coordinates curated.csv")
+# Read in coordinates data
+data <- read.csv("output/coordinates curated.csv")
 coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
                                  data$northing)), data=data)
 kud <- kernelUD(coords[,6], h="href", grid=500)
 
-home_range <- getverticeshr(kud, percent=95) %>% #home range 95% 
+# Calculate home range from coordinates
+home_range <- getverticeshr(kud, percent=95) %>% 
   st_as_sf() %>% #convert df to spatial object
   st_set_crs(st_crs("EPSG:32755")) #set CRS to UTM
 
+# Calculate core range from coordinates
 core_range <- getverticeshr(kud, percent=50) %>% #core range 50% 
   st_as_sf() %>% #convert df to spatial object
   st_set_crs(st_crs("EPSG:32755")) #set CRS to UTM
 
-ranges_study <- data.frame(left_join(st_drop_geometry(home_range), #extract areas
-                                     st_drop_geometry(core_range), by="id")) %>%
+# Extract areas
+ranges_study <- data.frame(left_join(st_drop_geometry(home_range),
+                                     st_drop_geometry(core_range), 
+                                     by="id")) %>%
   rename(home_range=area.x, core_range=area.y, name=id) %>%
   mutate(period="Study")
 ```
@@ -553,18 +609,20 @@ ranges_study <- data.frame(left_join(st_drop_geometry(home_range), #extract area
 ### Range per period
 
 ```{r, eval=FALSE}
-data <- read.csv("processed data/coordinates curated.csv") %>%
+# Read in coordinates data
+data <- read.csv("output/coordinates curated.csv") %>%
   mutate(period=as.character(period))
 coords <- SpatialPointsDataFrame(coordinates(cbind(data$easting, 
                                  data$northing)), data=data)
 quolls <- unique(data$name)
 period <- unique(data$period)
 
-#home range
+# Loop to calculate home range
 hr <- data.frame()
 for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   
-  baseline <- coords %>% subset(name==quolls[i] & period=="Baseline", select=name)
+  baseline <- coords %>% subset(name==quolls[i] & period=="Baseline", 
+                                select=name)
   try(baseline <- baseline %>%
         kernelUD(h="href", grid=500, extent=10) %>%
         getverticeshr(percent=95) %>%
@@ -574,7 +632,8 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   print(baseline)
   hr <- rbind.data.frame(hr, baseline)
   
-  release <- coords %>% subset(name==quolls[i] & period=="Release", select=name)
+  release <- coords %>% subset(name==quolls[i] & period=="Release", 
+                               select=name)
   try(release <- release %>%
         kernelUD(h="href", grid=500, extent=10) %>%
         getverticeshr(percent=95) %>%
@@ -584,7 +643,8 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   print(release)
   hr <- rbind.data.frame(hr, release)
   
-  settlement <- coords %>% subset(name==quolls[i] & period=="Settlement", select=name)
+  settlement <- coords %>% subset(name==quolls[i] & period=="Settlement", 
+                                  select=name)
   try(settlement <- settlement %>%
         kernelUD(h="href", grid=500, extent=10) %>%
         getverticeshr(percent=95) %>%
@@ -595,11 +655,12 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   hr <- rbind.data.frame(hr, settlement)
   }
 
-#core range
+# Loop to calculate core range
 cr <- data.frame()
 for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   
-  baseline <- coords %>% subset(name==quolls[i] & period=="Baseline", select=name)
+  baseline <- coords %>% subset(name==quolls[i] & period=="Baseline", 
+                                select=name)
   try(baseline <- baseline %>%
         kernelUD(h="href", grid=500, extent=10) %>%
         getverticeshr(percent=50) %>%
@@ -609,7 +670,8 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   print(baseline)
   cr <- rbind.data.frame(cr, baseline)
   
-  release <- coords %>% subset(name==quolls[i] & period=="Release", select=name)
+  release <- coords %>% subset(name==quolls[i] & period=="Release", 
+                               select=name)
   try(release <- release %>%
         kernelUD(h="href", grid=500, extent=10) %>%
         getverticeshr(percent=50) %>%
@@ -619,7 +681,8 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   print(release)
   cr <- rbind.data.frame(cr, release)
   
-  settlement <- coords %>% subset(name==quolls[i] & period=="Settlement", select=name)
+  settlement <- coords %>% subset(name==quolls[i] & period=="Settlement", 
+                                  select=name)
   try(settlement <- settlement %>%
         kernelUD(h="href", grid=500, extent=10) %>%
         getverticeshr(percent=50) %>%
@@ -630,14 +693,15 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
   cr <- rbind.data.frame(cr, settlement)
 }
 
-ranges_period <- data.frame(left_join(st_drop_geometry(hr), #extract areas
+# Extract areas
+ranges_period <- data.frame(left_join(st_drop_geometry(hr), 
                                       st_drop_geometry(cr), 
                                       by=c("id", "period"))) %>%
   rename(home_range=area.x, core_range=area.y, name=id)
 
 ranges <- rbind(ranges_period, ranges_study) %>%
   merge(lookup, by=c("name","period"))
-write.csv(ranges, "processed data/ranges per period.csv")
+write.csv(ranges, "output/ranges per period.csv")
 ```
 
 ### Models and summaries
@@ -645,7 +709,7 @@ write.csv(ranges, "processed data/ranges per period.csv")
 Next we use a GLMs to test the fixed effects of `cohort`, `period`, and `morph` on the home and core ranges of each quoll.
 
 ```{r}
-ranges_model <- read.csv("processed data/ranges per period.csv") %>% 
+ranges_model <- read.csv("output/ranges per period.csv") %>% 
   subset(period!="Study") %>%
   mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
 
@@ -674,7 +738,7 @@ random_effects <- model_data %>%
                 max_temp, precip, moon) %>%
   distinct(night_12hr, .keep_all=T)
 
-ranges_data <- read.csv("processed data/ranges per day.csv") %>%
+ranges_data <- read.csv("output/ranges per day.csv") %>%
   mutate(cohort=factor(cohort, 
                        levels=c("Resident", "Reinforcer"))) %>%
   left_join(random_effects, by="night_12hr")
@@ -805,7 +869,7 @@ print(hr_cr_map)
 ```
 
 ```{r, include=FALSE}
-tiff(file="figures/Fig 3 (ranges map).tiff", 
+tiff(file="output/Fig 3 (ranges map).tiff", 
      height=1500, width=1700, units="px", res=300)
 hr_cr_map
 dev.off()
@@ -846,14 +910,15 @@ core_overlap <- out %>%
   rename(name=id, name2=id.1, overlap=area_int) %>%
   dplyr::select(-area, -area.1)
 
-#combining
-overlap <- data.frame(left_join(st_drop_geometry(home_overlap), #extract areas
+# Extract areas and combine
+overlap <- data.frame(left_join(st_drop_geometry(home_overlap), 
                                 st_drop_geometry(core_overlap), 
                                 by=c("name", "name2"))) %>%
   rename(home_overlap=overlap.x, core_overlap=overlap.y)
 
 lookup_distinct2 <- lookup_distinct %>%
-  rename(name2=name, cohort2=cohort, morph2=morph) #to lookup cohort of second quoll
+  # Lookup cohort of second quoll
+  rename(name2=name, cohort2=cohort, morph2=morph)
 
 overlap <- overlap %>%
   merge(lookup_distinct, by=c("name")) %>%
@@ -861,13 +926,13 @@ overlap <- overlap %>%
   mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
 overlap[is.na(overlap)] <- 0
 
-write.csv(overlap, "processed data/overlap per individual.csv")
+write.csv(overlap, "output/overlap per individual.csv")
 ```
 
 ### Models and summaries
 
 ```{r}
-overlap <- read.csv("processed data/overlap per individual.csv") %>%
+overlap <- read.csv("output/overlap per individual.csv") %>%
     mutate(cohort=factor(cohort, levels=c("Resident","Reinforcer")))
 
 round(coef(summary(glm(home_overlap ~ cohort + morph, 
@@ -880,8 +945,10 @@ round(coef(summary(glm(core_overlap ~ cohort + morph,
 We found significant differences between cohorts in the area of home (*p* < 0.0001) and core (*p* < 0.006) ranges that overlapped with those of other collared eastern quolls. 
 
 ```{r}
-res_overlap <- subset(overlap, cohort=="Resident") %>% na.omit()
-fou_overlap <- subset(overlap, cohort=="Reinforcer") %>% na.omit()
+res_overlap <- subset(overlap, cohort=="Resident") %>% 
+  na.omit()
+fou_overlap <- subset(overlap, cohort=="Reinforcer") %>% 
+  na.omit()
 
 # Summary statistics
 data.frame(Cohort=c("Resident", "Resident", "Reinforcer", "Reinforcer"), 
@@ -913,7 +980,8 @@ home_period <- ggplot(data=ranges_model,
               col="grey30", alpha=0.7, width=1.1, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=cohort), 
                fill="grey30", width=0.04, lwd=0.6) +
-  stat_summary(position=pos, aes(col=cohort), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=cohort), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=600, label="b)", fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
@@ -939,7 +1007,8 @@ print(home_period)
 # Regression plot
 home_time <- ggplot(data=ranges_data, aes(x=night_12hr, 
                                           y=as.numeric(home_range))) +
-  geom_smooth(method='lm', aes(fill=cohort, col=cohort), lwd=0.8, alpha=0.5) +
+  geom_smooth(method='lm', aes(fill=cohort, col=cohort), 
+              lwd=0.8, alpha=0.5) +
   #annotate(geom="text", x=50, y=300, label="c)", fontface="bold", size=6) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
@@ -970,7 +1039,8 @@ home_overlap_plot <- ggplot(overlap, aes(x=cohort,
               col="grey30", alpha=0.7, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=cohort), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=cohort), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=cohort), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=250, label="d)", fontface="bold", size=6) + 
   theme(panel.grid.major = element_blank(),
@@ -995,7 +1065,7 @@ dist_ranges_plots <- ggarrange(dist_plot, home_period,
                          ncol=2, nrow=2, widths=c(3,3,3,3))
 print(dist_ranges_plots)
 
-tiff(file="figures/Fig 2a–d (distance and ranges).tiff", 
+tiff(file="output/Fig 2a–d (distance and ranges).tiff", 
      height=1550, width=2100, units="px", res=300)
 dist_ranges_plots
 dev.off()
@@ -1008,7 +1078,7 @@ Here we investigated eastern quoll nocturnal activity (GPS fixes) and diurnal de
 Firstly, we used the [National Vegetation Information System (version 6.0)](http://www.environment.gov.au/fed/catalog/search/resource/details.page?uuid=%7Bab942d6d-9efd-4cf2-bec7-4c1521b83803%7D) major extant vegetation groups we created earlier ('Clip by MFWS fence' section) to create five broad habitat types relevant to MFWS. Below we visualised how the eight NVIS vegetation groups were aggregated into the five MFWS habitat types by **barplot** and **map**.
 
 ```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=6}
-nvis_shp <- readOGR(dsn="shapefiles/mfws_nvis_vegetation_groups.shp") %>%
+nvis_shp <- readOGR(dsn="input/mfws_nvis_vegetation_groups.shp") %>%
   spTransform(CRS("+proj=longlat +ellps=WGS84 +datum=WGS84")) 
 nvis_shp$area <- raster::area(nvis_shp)/1000000 #library(raster) in km2
 fortify <- fortify(nvis_shp) #transforms from from sp to dataframe
@@ -1067,7 +1137,7 @@ nvis_barplot <- ggplot(nvis_groups, col="grey30",
   
 ```{r, warning=FALSE, fig.align="center", fig.width=6, fig.height=6}
 # Map plot
-nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp") %>%
+nvis <- st_read("input/mfws_nvis_vegetation_groups.shp") %>%
   st_transform("EPSG:4326") %>% 
   clean_names() %>% 
   mutate(mfws_name=factor(mfws_name, 
@@ -1111,7 +1181,7 @@ print(nvis_methods)
 ```
 
 ```{r, include=FALSE}
-tiff(file="figures/Fig 1a–b (habitat type and map).tiff", 
+tiff(file="output/Fig 1a–b (habitat type and map).tiff", 
      width=3000, height=1250, units="px", res=300)
 print(nvis_methods)
 dev.off()
@@ -1125,12 +1195,14 @@ Here we calculate the frequency of nocturnal locations (GPS fixes) per habitat t
 
 ```{r}
 #data for plots
-noc <- read.csv("processed data/coordinates curated.csv") %>%
-  group_by(mfws_habitat) %>% count() %>% 
+noc <- read.csv("output/coordinates curated.csv") %>%
+  group_by(mfws_habitat) %>% 
+  count() %>% 
   # Create frequency and percentage (adjusted by frequency of fixes) variables
   mutate(freq=n, perc=(freq/2950)*100)
 
-mfws_group <- as.data.frame(nvis_shp) %>% clean_names() %>%
+mfws_group <- as.data.frame(nvis_shp) %>% 
+  clean_names() %>%
   mutate(mfws_habitat=mfws_name) %>%
   group_by(mfws_habitat) %>%
   summarise(area=sum(area))
@@ -1149,7 +1221,7 @@ noc_plot <- noc %>% clean_names() %>%
          type="Nocturnal activity")
 
 # Read in coordinates for modelling
-noc_period <- read.csv("processed data/coordinates curated.csv") %>%
+noc_period <- read.csv("output/coordinates curated.csv") %>%
   group_by(cohort, period, morph, name, mfws_habitat) %>%
   summarise(fixes=length(mfws_habitat))
 
@@ -1179,12 +1251,12 @@ We also quantified eastern quoll habitat use using the following LiDAR rasters:
 pacman::p_load(ggpubr, lme4, MuMIn, plotrix, raster, sf, viridis)
 
 # Read in raster data
-overstory <- raster("rasters/mfgo_overstory.tif")
-understory <- raster("rasters/mfgo_understory.tif")
-aspect <- raster("rasters/mfgo_aspect.tif")
+overstory <- raster("input/mfgo_overstory.tif")
+understory <- raster("input/mfgo_understory.tif")
+aspect <- raster("input/mfgo_aspect.tif")
 
 # Read in coordinates data
-noc <- read.csv("processed data/coordinates curated.csv") %>%
+noc <- read.csv("output/coordinates curated.csv") %>%
   mutate(easting=as.numeric(easting),
          northing=as.numeric(northing))
 
@@ -1210,7 +1282,7 @@ To determine whether the overstory, understory, and aspect values for each indiv
 
 ```{r}
 # Read in MFWS fence polygon using sf
-mf_fence <- st_read("shapefiles/mfws_fence.shp", quiet=TRUE) %>%
+mf_fence <- st_read("input/mfws_fence.shp", quiet=TRUE) %>%
   st_set_crs("EPSG:32755")
 
 # Extract available overstory in MFWS
@@ -1349,7 +1421,8 @@ Similarly, we calculated the frequency of diurnal dens (VHF fixes) per habitat t
 ```{r}
 # Read in coordinates data and prepare for plotting
 diu <- read_excel(raw_data, sheet="dens") %>% 
-  clean_names() %>% na.omit() %>%
+  clean_names() %>% 
+  na.omit() %>%
   mutate(easting=as.numeric(easting), 
          northing=as.numeric(northing), 
          date=as.POSIXct(date_tracked), 
@@ -1366,7 +1439,7 @@ diu_sp <- SpatialPointsDataFrame( #library(sp)
   data.frame(diu$easting, diu$northing), diu,
   proj4string=CRS("EPSG:32755")) %>% st_as_sf()
 
-nvis <- st_read("shapefiles/mfws_nvis_vegetation_groups.shp", quiet=TRUE) %>%
+nvis <- st_read("input/mfws_nvis_vegetation_groups.shp", quiet=TRUE) %>%
   st_transform("EPSG:32755")
 
 diu_nvis <- st_join(diu_sp, nvis, join=st_intersects) %>%
@@ -1610,7 +1683,8 @@ noc_nvis_plot <- ggplot(noc_plot,
                         aes(x=mfws_habitat, y=freq_adj,
                             fill=mfws_habitat), col="grey30") + 
   geom_col(size=0.5, col="grey30", alpha=0.8) +
-  geom_text(aes(label = paste0(round(perc_adj, digits=1), "%"), vjust=-0.5)) +
+  geom_text(aes(label = paste0(round(perc_adj, digits=1), 
+                               "%"), vjust=-0.5)) +
   #annotate(geom="text", x=1, y=1500, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
@@ -1663,10 +1737,11 @@ nvis_plot <- ggarrange(noc_nvis_plot, diu_nvis_plot,
 ```
 
 ```{r, include=FALSE}
-tiff(file="figures/Fig 4a–b (habitat type frequency).tiff", 
+tiff(file="output/Fig 4a–b (habitat type frequency).tiff", 
      width=2100, height=1000, units="px", res=300)
 print(nvis_plot)
-annotate_figure(nvis_plot, bottom=textGrob("MFWS habitat", gp=gpar(cex=1)))
+annotate_figure(nvis_plot, bottom=textGrob("MFWS habitat", 
+                                           gp=gpar(cex=1)))
 dev.off()
 ```
 
@@ -1677,12 +1752,14 @@ lidar_os <- subset(lidar_plot, raster=="Overstory")
 lidar_us <- subset(lidar_plot, raster=="Understory")
 lidar_as <- subset(lidar_plot, raster=="Aspect")
 
-lidar_os_plot <- ggplot(data=lidar_os, aes(x=type, y=raster_units)) +
+lidar_os_plot <- ggplot(data=lidar_os, 
+                        aes(x=type, y=raster_units)) +
   geom_violin(position=pos, aes(fill=type), 
               col="grey30", alpha=0.7, width=1.25, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=type), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=type), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=type), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=72, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -1704,7 +1781,8 @@ lidar_us_plot <- ggplot(data=lidar_us,
               col="grey30", alpha=0.7, width=1.25, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=type), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=type), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=type), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=39, label="b)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -1720,12 +1798,14 @@ lidar_us_plot <- ggplot(data=lidar_us,
   xlab("") + ylab("Understory layer cover (%)")
 print(lidar_us_plot)
 
-lidar_as_plot <- ggplot(data=lidar_as, aes(x=type, y=raster_units)) +
+lidar_as_plot <- ggplot(data=lidar_as, 
+                        aes(x=type, y=raster_units)) +
   geom_violin(position=pos, aes(fill=type), 
               col="grey30", alpha=0.7, width=1.2, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=type), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=type), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=type), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=355, label="c)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -1751,7 +1831,8 @@ lidar_us_period_noc <- ggplot(data=noc_lidar,
               col="grey30", alpha=0.7, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=period), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=period), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=30, label="d)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -1776,7 +1857,8 @@ lidar_as_period_noc <- ggplot(data=noc_lidar,
               col="grey30", alpha=0.7, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=period), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=period), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=350, label="e)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -1799,7 +1881,8 @@ lidar_os_period_diu <- ggplot(data=diu_lidar,
               col="grey30", alpha=0.7, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=period), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=period), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=55, label="f)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -1822,7 +1905,8 @@ lidar_as_period_diu <- ggplot(data=diu_lidar,
               col="grey30", alpha=0.7, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=period), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=period), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=350, label="g)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -1869,7 +1953,7 @@ lidar_plots_ag <- ggarrange(lidar_avail_plots_abc,
                                 lidar_period_plots_de, 
                                 lidar_period_plots_fg, nrow=3)
 
-tiff(file="figures/Fig 5a–g (habitat attribute by period).tiff", 
+tiff(file="output/Fig 5a–g (habitat attribute by period).tiff", 
      height=2750, width=2500, units="px", res=300)
 print(lidar_plots_ag)
 dev.off()
@@ -1891,7 +1975,7 @@ To quantify conspecific associations, we used the [wildlifeDI package](https://w
   1. Study period
 
 ```{r, eval=FALSE}
-data <- read.csv("processed data/coordinates curated.csv") %>% 
+data <- read.csv("output/coordinates curated.csv") %>% 
   mutate(date_time_12hr=as.POSIXct(strptime(date_time_12hr, 
                                             format="%Y-%m-%d %H:%M",
                                             tz="Australia/Sydney")))
@@ -1972,25 +2056,29 @@ for (i in 1:length(list1)){
   try(prox <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+              tc=30*60, dc=50)),
     silent=TRUE)
   
   try(cr <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60)),
     silent=TRUE)
   
   try(cs <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60)),
     silent=TRUE)
   
   try(ca <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60, dc=50)),
     silent=TRUE)
   
   out_cr <- left_join(prox, cr, by=c("quoll1", "quoll2"))
@@ -2030,25 +2118,29 @@ for (i in 1:length(list1)){
   try(prox <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+              tc=30*60, dc=50)),
     silent=TRUE)
   
   try(cr <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60)),
     silent=TRUE)
   
   try(cs <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60)),
     silent=TRUE)
   
   try(ca <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60, dc=50)),
     silent=TRUE)
   
   out_cr <- left_join(prox, cr, by=c("quoll1", "quoll2"))
@@ -2088,25 +2180,29 @@ for (i in 1:length(list1)){
   try(prox <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    prox=Prox(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+              tc=30*60, dc=50)),
     silent=TRUE)
   
   try(cr <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    cr=Cr(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60)),
     silent=TRUE)
   
   try(cs <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60)),
+    cs=Cs(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60)),
     silent=TRUE)
   
   try(ca <- data.frame(
     quoll1=attr(data_ltraj[[list1[i]]], "id"),
     quoll2=attr(data_ltraj[[list2[i]]], "id"),
-    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], tc=30*60, dc=50)),
+    ca=Ca(data_ltraj[list1[i]], data_ltraj[list2[i]], 
+          tc=30*60, dc=50)),
     silent=TRUE)
   
   out_cr <- left_join(prox, cr, by=c("quoll1", "quoll2"))
@@ -2123,7 +2219,7 @@ interact_settlement <- interact %>% #remove any duplicate pairs
 interact <- rbind(interact_baseline, interact_release,
                   interact_settlement, interact_study)
 
-write.csv(interact, "processed data/interaction coefficients.csv")
+write.csv(interact, "output/interaction coefficients.csv")
 ```
 
 The `interact` dataframe now contains several dynamic interaction coefficients for each combination of quolls for each study period. 
@@ -2131,7 +2227,7 @@ The `interact` dataframe now contains several dynamic interaction coefficients f
 Now we add `cohort` and `morph` back into the dataframe using a `lookup `table, and averaged each of the coefficients per individual per `period` for our summary statistics.
 
 ```{r}
-interact <- read.csv("processed data/interaction coefficients.csv") %>%
+interact <- read.csv("output/interaction coefficients.csv") %>%
   mutate(name=quoll1) %>%
   na.omit() %>%
   merge(lookup, by=c("name", "period")) %>%
@@ -2201,7 +2297,8 @@ On average, Pearson coefficients were significantly lower during the settlement 
 
 ```{r}
 coden <- read_excel(raw_data, sheet="dens") %>% 
-  clean_names() %>% na.omit() %>%
+  clean_names() %>% 
+  na.omit() %>%
   mutate(easting = as.numeric(easting), 
          northing = as.numeric(northing), 
          date = as.POSIXct(date_tracked), 
@@ -2307,7 +2404,8 @@ pear_period_plot <- ggplot(data=interact,
               col="grey30", alpha=0.7, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=morph), 
                fill="grey30", width=0.04, lwd=0.6) +
-  stat_summary(position=pos, aes(col=morph), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=morph), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=0.75, label="a)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -2337,7 +2435,8 @@ soc_period_plot <- ggplot(data=interact,
               col="grey30", alpha=0.7, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=period), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=period), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=period), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=0.75, label="b)", fontface="bold", size=6) + 
   theme(panel.grid.major = element_blank(),
@@ -2360,7 +2459,8 @@ coden_plot <- ggplot(data=sharing_plot,
               col="grey30", alpha=0.7, width=1.45, lwd=0.6) +
   geom_boxplot(position=pos, aes(col=cohort), 
                fill="grey30", width=0.03, lwd=0.6) +
-  stat_summary(position=pos, aes(col=cohort), fun="median", geom="point", 
+  stat_summary(position=pos, aes(col=cohort), 
+               fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
   #annotate(geom="text", x=0.7, y=0.95, label="c)", fontface="bold", size=6) +
   theme(panel.grid.major = element_blank(),
@@ -2385,20 +2485,22 @@ print(coden_plot)
 ```
 
 ```{r, include=FALSE}
-interact_plot <- ggarrange(pear_period_plot, soc_period_plot, 
-                           coden_plot, ncol=3, nrow=1, label.x=0.89, 
-                           widths=c(3,3,3), label.y=0.99, hjust=-0.1, vjust=1.5, 
-                           font.label=list(size=10, face="bold", color="black"))
+interact_plot <- ggarrange(pear_period_plot, soc_period_plot, coden_plot, 
+                           ncol=3, nrow=1, label.x=0.89, widths=c(3,3,3), 
+                           label.y=0.99, hjust=-0.1, vjust=1.5, 
+                           font.label=list(size=10, 
+                                           face="bold", 
+                                           color="black"))
 print(interact_plot)
 
-tiff(file="figures/Fig 6a–c (associations).tiff", 
+tiff(file="output/Fig 6a–c (associations).tiff", 
      width=3000, height=1000, units="px", res=300)
 print(interact_plot)
 dev.off()
 ```
 
 ```{r, include=FALSE}
-# Model table
+# Here we generated our models to compile a model table for our manuscript
 
 # Distance travelled per night
 mod <- lmer(distance_night ~ (cohort*period) + morph +
@@ -2408,7 +2510,6 @@ anova(mod) #F-value
 car::Anova(mod) #chisq + p-value
 summary(mod) #random effects
 
-
 # Home range
 mod <- lmer(home_range ~ (cohort*period) + morph + 
               (1|name) + (1|day) + (1|precip) + 
@@ -2417,15 +2518,14 @@ anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
 
-
 # Core range
 mod <- lmer(core_range ~ (cohort*period) + morph + 
-              (1|name) + (1|day) + (1|precip) + (1|min_temp) + (1|moon),
+              (1|name) + (1|day) + (1|precip) + 
+              (1|min_temp) + (1|moon),
             data=ranges_data)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
-
 
 # Conspecific overlap
 mod <- glm(home_overlap ~ cohort + morph, data=overlap)
@@ -2437,8 +2537,9 @@ mod <- glm(core_overlap ~ cohort + morph, data=overlap)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
+```
 
-
+```{r, include=FALSE}
 # Nocturnal activity
 
 mod <- lmer(percentage ~ cohort*period + morph + 
@@ -2482,8 +2583,9 @@ mod <- lmer(aspect ~ cohort*period + morph +
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
+```
 
-
+```{r, include=FALSE}
 # Diurnal denning
 
 mod <- lmer(percentage ~ cohort*period + morph + 
@@ -2542,8 +2644,9 @@ mod <- glm(raster_units ~ type, data=lidar_as)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
 summary(mod) #random effects
+```
 
-
+```{r, include=FALSE}
 # Proximity index
 
 mod <- glm(prox ~ cohort*period + morph, data=interact)
@@ -2569,19 +2672,17 @@ car::Anova(mod) #chisq + p-value,
 mod <- glm(bin ~ cohort + period + morph, data=coden, 
            family=binomial(link="logit"))
 anova(mod) #F-value
-car::Anova(mod) #chisq + p-value, 
+car::Anova(mod) #chisq + p-value
 ```
 
 # **Animation**
 
-By following a [gganimate tutorial by Katherine Goode](https://goodekat.github.io/presentations/2019-isugg-gganimate-spooky/slides.html?fbclid=IwAR0xBuMZO0ZCKjx2SF6hTPL5lv8JMfALIlmwopA_QmqGddCuN6jab3msWsY#1), we created an animation showing the movement of the eastern quolls over the study period.
-
- ⚠️ *Currently not working*
+Following the [gganimate tutorial by Katherine Goode](https://goodekat.github.io/presentations/2019-isugg-gganimate-spooky/slides.html?fbclid=IwAR0xBuMZO0ZCKjx2SF6hTPL5lv8JMfALIlmwopA_QmqGddCuN6jab3msWsY#1), we created an animation showing the movement of the eastern quolls over the study period - ⚠️ *currently not running.*
 
 ```{r, include=FALSE, eval=FALSE}
 pacman::p_load(gganimate, ggplot2, tidyverse, transformr)
 
-quoll_animation <- read.csv("processed data/coordinates curated.csv") %>%
+quoll_animation <- read.csv("output/coordinates curated.csv") %>%
   mutate(name=factor(name)) %>%
   #mutate(image=bat_image_link) %>%
   ggplot(aes(x=longitude, y=latitude, color=aest, group=name)) +
