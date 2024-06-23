@@ -1,7 +1,7 @@
 ---
 title: "Everybody needs good neighbours: movement and conspecific association in a reintroduced mesopredator"
 author: "Wilson B A, Evans M J, Rapley S, Gordon I J, Wimpenny C, Newport J, & Manning A D"
-date: "May 1, 2024"
+date: "Jun 23, 2024"
 output:
   html_document:
     toc: true
@@ -84,8 +84,8 @@ coords <- coords %>%
   subset(night_12hr >=3 & night_12hr <=52) %>%
   mutate(period=ifelse(night_12hr >=3 & night_12hr <=21, 
                        'Baseline', 
-                ifelse(night_12hr >=22 & night_12hr <=32, '
-                       Release',
+                ifelse(night_12hr >=22 & night_12hr <=32, 
+                       'Release',
                 ifelse(night_12hr >=33 & night_12hr <=52, 
                        'Settlement', NA)))) %>%
   subset(ifelse(cohort=="Resident", night_12hr <=32, 
@@ -475,6 +475,11 @@ We found study period had a significant effect on the distances travelled per ni
 Finally, we plot mean distance by study period. 
 
 ```{r, fig.align="center", fig.width=4, fig.height=3}
+dist_plot <- ggplot(data=distance_night, 
+                      aes(x=period, y=as.numeric(distance))) +
+  geom_violin(aes(fill=period), col="grey30", 
+              alpha=0.7, lwd=0.6)
+
 # Plot mean distances by study period
 dist_plot <- ggplot(data=distance_night, 
                       aes(x=period, y=as.numeric(distance))) +
@@ -485,7 +490,7 @@ dist_plot <- ggplot(data=distance_night,
   stat_summary(fun="median", geom="point", 
                col="grey30", fill="white", 
                shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=6, label="a)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=6.1, label="a", fontface="bold", size=5) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
@@ -983,7 +988,7 @@ home_period <- ggplot(data=ranges_model,
   stat_summary(position=pos, aes(col=cohort), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=600, label="b)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.3, y=630, label="b", fontface="bold", size=5) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
@@ -1009,7 +1014,7 @@ home_time <- ggplot(data=ranges_data, aes(x=night_12hr,
                                           y=as.numeric(home_range))) +
   geom_smooth(method='lm', aes(fill=cohort, col=cohort), 
               lwd=0.8, alpha=0.5) +
-  #annotate(geom="text", x=50, y=300, label="c)", fontface="bold", size=6) +
+  annotate(geom="text", x=50, y=340, label="c", fontface="bold", size=5) +
   theme(panel.grid.major=element_blank(),
         panel.grid.minor=element_blank(),
         panel.background=element_rect(fill="white"),
@@ -1042,7 +1047,7 @@ home_overlap_plot <- ggplot(overlap, aes(x=cohort,
   stat_summary(position=pos, aes(col=cohort), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=250, label="d)", fontface="bold", size=6) + 
+  annotate(geom="text", x=2.4, y=275, label="d", fontface="bold", size=5) + 
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1066,7 +1071,7 @@ dist_ranges_plots <- ggarrange(dist_plot, home_period,
 print(dist_ranges_plots)
 
 tiff(file="output/Fig 2a–d (distance and ranges).tiff", 
-     height=1550, width=2100, units="px", res=300)
+     height=1600, width=2150, units="px", res=300)
 dist_ranges_plots
 dev.off()
 ```
@@ -1110,7 +1115,7 @@ nvis_barplot <- ggplot(nvis_groups, col="grey30",
                        aes(x=nvis_habitat, y=area, fill=mfws_habitat)) + 
   geom_col(size=0.5, col="grey30", lwd=0.7, alpha=0.8) +
   geom_text(aes(label = paste0(round(perc, digits=1), "%"), vjust=-0.5)) +
-  #annotate(geom="text", x=8, y=2.0, label="a)", fontface="bold", size=6) +
+  annotate(geom="text", x=8, y=2.1, label="a", fontface="bold", size=5) +
   theme(axis.line.x = element_line(colour="black"),
         axis.line.y = element_line(colour="black"),
         legend.position = "none",
@@ -1152,7 +1157,8 @@ nvis_mfws <- ggplot() +
                    width_hint=0.3, 
                    pad_x=unit(1.55, "cm"),
                    pad_y=unit(0, "cm")) +
-  #annotate(geom="text", y=-35.157, x=149.186, label="b)", fontface="bold", size=6)
+  annotate(geom="text", y=-35.154, x=149.185, label="b", 
+           fontface="bold", size=5) +
   theme(axis.line.x = element_blank(),
         axis.line.y = element_blank(),
         legend.position = c(0.75, 0.15),
@@ -1389,7 +1395,7 @@ summary(mod) #t-statistic, random effects
 # Overall
 data.frame(Measure=c("Overstory (%):", 
                      "Understory (%):", 
-                     "Aspect (degrees):"),
+                     "Aspect (°):"),
            Mean=c(mean(noc_lidar$overstory)*100, 
                   mean(noc_lidar$understory)*100,
                   mean(noc_lidar$aspect)),
@@ -1573,7 +1579,7 @@ round(coef(summary(lmer(aspect ~ cohort*period + morph +
 # Overall
 data.frame(Measure=c("Overstory (%):", 
                      "Understory (%):", 
-                     "Aspect (degrees):"),
+                     "Aspect (°):"),
            Mean=c(mean(diu_lidar$overstory)*100, 
                   mean(diu_lidar$understory)*100,
                   mean(diu_lidar$aspect)),
@@ -1638,7 +1644,7 @@ avai_as <- subset(avai_lidar, raster=="Aspect")
 
 # Summary statistics
 data.frame(Measure=c("Overstory (%):", "Understory (%):", 
-                     "Aspect (degrees):"),
+                     "Aspect (°):"),
            Mean=c(mean(avai_os$raster_units), 
                   mean(avai_us$raster_units),
                   mean(avai_as$raster_units)),
@@ -1685,7 +1691,7 @@ noc_nvis_plot <- ggplot(noc_plot,
   geom_col(size=0.5, col="grey30", alpha=0.8) +
   geom_text(aes(label = paste0(round(perc_adj, digits=1), 
                                "%"), vjust=-0.5)) +
-  #annotate(geom="text", x=1, y=1500, label="a)", fontface="bold", size=6) +
+  annotate(geom="text", x=1, y=1500, label="a", fontface="bold", size=4) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_blank(),
@@ -1711,7 +1717,7 @@ diu_nvis_plot <- ggplot(diu_plot,
   geom_col(size=0.5, col="grey30", alpha=0.8) +
   geom_text(aes(label = paste0(round(perc_adj, digits=1), 
                                "%"), vjust=-0.5)) +
-  #annotate(geom="text", x=1, y=150, label="b)", fontface="bold", size=6) +
+  annotate(geom="text", x=1, y=150, label="b", fontface="bold", size=4) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_blank(),
@@ -1761,7 +1767,7 @@ lidar_os_plot <- ggplot(data=lidar_os,
   stat_summary(position=pos, aes(col=type), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=72, label="a)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=75, label="a", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1772,7 +1778,7 @@ lidar_os_plot <- ggplot(data=lidar_os,
   scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
-  xlab("") + ylab("Overstory layer cover (%)")
+  xlab("") + ylab("Overstory cover (%)")
 print(lidar_os_plot)
 
 lidar_us_plot <- ggplot(data=lidar_us, 
@@ -1784,7 +1790,7 @@ lidar_us_plot <- ggplot(data=lidar_us,
   stat_summary(position=pos, aes(col=type), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=39, label="b)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=40, label="b", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1795,7 +1801,7 @@ lidar_us_plot <- ggplot(data=lidar_us,
   scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_fill_manual(values=viridis(3, begin=0.9, end=0.1)) +
   scale_x_discrete(labels=wrap_format(3)) + #library(scales) +
-  xlab("") + ylab("Understory layer cover (%)")
+  xlab("") + ylab("Understory cover (%)")
 print(lidar_us_plot)
 
 lidar_as_plot <- ggplot(data=lidar_as, 
@@ -1807,7 +1813,7 @@ lidar_as_plot <- ggplot(data=lidar_as,
   stat_summary(position=pos, aes(col=type), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=355, label="c)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=360, label="c", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1818,7 +1824,7 @@ lidar_as_plot <- ggplot(data=lidar_as,
   scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("") + ylab("Aspect (degrees)")
+  xlab("") + ylab("Aspect (°)")
 print(lidar_as_plot)
 ```
 
@@ -1834,7 +1840,7 @@ lidar_us_period_noc <- ggplot(data=noc_lidar,
   stat_summary(position=pos, aes(col=period), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=30, label="d)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=31, label="d", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1848,7 +1854,7 @@ lidar_us_period_noc <- ggplot(data=noc_lidar,
   scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Understory layer cover (%)")
+  xlab("Study period") + ylab("Understory cover (%)")
 print(lidar_us_period_noc)
 
 lidar_as_period_noc <- ggplot(data=noc_lidar, 
@@ -1860,7 +1866,7 @@ lidar_as_period_noc <- ggplot(data=noc_lidar,
   stat_summary(position=pos, aes(col=period), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=350, label="e)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=375, label="e", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1872,7 +1878,7 @@ lidar_as_period_noc <- ggplot(data=noc_lidar,
   scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Aspect (degrees)")
+  xlab("Study period") + ylab("Aspect (°)")
 print(lidar_as_period_noc)
 
 lidar_os_period_diu <- ggplot(data=diu_lidar, 
@@ -1884,7 +1890,7 @@ lidar_os_period_diu <- ggplot(data=diu_lidar,
   stat_summary(position=pos, aes(col=period), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=55, label="f)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=58, label="f", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1896,7 +1902,7 @@ lidar_os_period_diu <- ggplot(data=diu_lidar,
   scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Overstory layer cover (%)")
+  xlab("Study period") + ylab("Overstory cover (%)")
 print(lidar_os_period_diu)
 
 lidar_as_period_diu <- ggplot(data=diu_lidar, 
@@ -1908,7 +1914,7 @@ lidar_as_period_diu <- ggplot(data=diu_lidar,
   stat_summary(position=pos, aes(col=period), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=350, label="g)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=375, label="g", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -1920,7 +1926,7 @@ lidar_as_period_diu <- ggplot(data=diu_lidar,
   scale_colour_manual(values=c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin=0.9, end=0.1)) +
-  xlab("Study period") + ylab("Aspect (degrees)")
+  xlab("Study period") + ylab("Aspect (°)")
 print(lidar_as_period_diu)
 ```
 
@@ -2407,7 +2413,7 @@ pear_period_plot <- ggplot(data=interact,
   stat_summary(position=pos, aes(col=morph), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=0.75, label="a)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=0.75, label="a", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2438,7 +2444,7 @@ soc_period_plot <- ggplot(data=interact,
   stat_summary(position=pos, aes(col=period), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=0.75, label="b)", fontface="bold", size=6) + 
+  annotate(geom="text", x=3.4, y=0.75, label="b", fontface="bold", size=5) + 
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2462,7 +2468,7 @@ coden_plot <- ggplot(data=sharing_plot,
   stat_summary(position=pos, aes(col=cohort), 
                fun="median", geom="point", 
                fill="white", shape=21, size=1.5, stroke=1) +
-  #annotate(geom="text", x=0.7, y=0.95, label="c)", fontface="bold", size=6) +
+  annotate(geom="text", x=3.4, y=0.89, label="c", fontface="bold", size=5) +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_rect(fill="white"),
@@ -2499,9 +2505,9 @@ print(interact_plot)
 dev.off()
 ```
 
-```{r, include=FALSE}
-# Here we generated our models to compile a model table for our manuscript
+Here we generated our model statistics to compile a model table for our manuscript.
 
+```{r, include=FALSE}
 # Distance travelled per night
 mod <- lmer(distance_night ~ (cohort*period) + morph +
               (1|name) + (1|day) + (1|precip) + (1|min_temp) + 
@@ -2541,7 +2547,6 @@ summary(mod) #random effects
 
 ```{r, include=FALSE}
 # Nocturnal activity
-
 mod <- lmer(percentage ~ cohort*period + morph + 
               (1|name), data=woodland)
 anova(mod) #F-value
@@ -2587,7 +2592,6 @@ summary(mod) #random effects
 
 ```{r, include=FALSE}
 # Diurnal denning
-
 mod <- lmer(percentage ~ cohort*period + morph + 
               (1|name), data=woodland)
 anova(mod) #F-value
@@ -2648,7 +2652,6 @@ summary(mod) #random effects
 
 ```{r, include=FALSE}
 # Proximity index
-
 mod <- glm(prox ~ cohort*period + morph, data=interact)
 anova(mod) #F-value
 car::Anova(mod) #chisq + p-value, 
