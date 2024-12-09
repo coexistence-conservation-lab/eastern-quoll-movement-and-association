@@ -1,6 +1,6 @@
 # **Eastern quoll movement and association**
 
-Here we describe the analyses conducted for our article Wilson *et al.* "*Everybody needs good neighbours: movement, habitat use, and conspecific association in a reintroduced mesopredator*", currently under review.
+Here we describe the analyses conducted for our article Wilson *et al.* "*Everybody needs good neighbours: movement, habitat use, and conspecific association in a reintroduced mesopredator*", published June 2024 in [Biodiveristy and Conservation](https://link.springer.com/article/10.1007/s10531-024-02884-z#Sec2).
 
 ---
 
