@@ -18,15 +18,18 @@ knit: "(function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = 
 
 ---
 
-```{r setup, include = FALSE}
-knitr::opts_chunk$set(warning = FALSE, message = FALSE)
-```
-
 # **Background**
 
-We investigated whether conspecific associations between seven maternal **resident** (descedents of founders or reinforcers) eastern quolls (*Dasyurus viverrinus*, *murunguny* in the Indigenous Ngunnawal language) affected the establishment of eight maternal **reinforcers** (translocated from Tasmania to reinforce demographic, behavioural, and genetic diversity in the population) at [Mulligans Flat Woodland Sanctuary (MFWS)](https://www.mulligansflat.org.au/), a fenced reserve in the Australian Capital Territory.
+This [R project](https://support.posit.co/hc/en-us/articles/200526207-Using-RStudio-Projects) presents the datasets and workflows used for Wilson *et al.* (2025a) "*Everybody needs good neighbours: movement, habitat use, and conspecific association in a reintroduced mesopredator*", published June 2024 in [Biodiveristy and Conservation](https://doi.org/10.1007/s10531-024-02884-z). For more information, see the [GitHub repo](https://github.com/coexistence-conservation-lab/**repo**) README.
 
-We used GPS collars to quantify **distances travelled**, **home** and **core ranges**, habitat use (**nocturnal activity** and **diurnal denning**), and **conspecific associations**. We compared these measures across three distinct periods:
+We used GPS collars to quantify: 
+
+ - **Distances travelled**
+ - **Home** and **core ranges**, 
+ - **Nocturnal (activity)** and **diurnal denning** habitat use and selection, and 
+ - **Conspecific associations**. 
+
+We compared these measures across three distinct periods:
 
   1. Baseline period (residents only, days 3-21),
   2. Release period (both cohorts, days 22-32), and
@@ -34,22 +37,80 @@ We used GPS collars to quantify **distances travelled**, **home** and **core ran
 
 # **Setup**
 
-First, we installed the [pacman Package Management Tool](https://cran.r-project.org/web/packages/pacman/index.html), which allows us to install and load subsequent packages in a condensed and efficient way.
+## Global options
 
-```{r, eval = FALSE}
-install.packages(pacman)
+When you [knit this document 🧶](https://rmarkdown.rstudio.com/authoring_quick_tour.html) (e.g., render to HTML), you can add **chunk options** to control what is shown in the output (e.g., `{r, message = FALSE, results = 'hide', warning = FALSE}`). To avoid long chunk headers like the one above, use these custom options:  
+
+  - **asis:** renders output *as-is* (e.g., for dynamic summaries)
+  - **echo_only:** shows *code only* (hides results and messages)
+  - **no_echo:** shows *output and messages* (hides code) 
+  - **results_only:** shows *results only* (hides code and messages)
+
+```{r global-options, echo = FALSE}
+# Set default knitting options 
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+
+# Set custom chunk knitting behaviours 
+knitr::opts_hooks$set(
+  
+  # Render output as-is for chunks with "asis = TRUE"
+  asis = function(x) {
+   if (isTRUE(x$asis)) x$results <- "asis" 
+   x}, 
+  
+  # Disable messages, results, and warnings for chunks with "echo_only = TRUE"
+  echo_only = function(x) {
+    if (isTRUE(x$echo_only)) {
+      x$message <- FALSE
+      x$results <- "hide"
+      x$warning <- FALSE} 
+    x},
+  
+  # Disable echo for chunks with "no_echo = TRUE"
+  no_echo = function(x) {
+    if (isTRUE(x$no_echo)) x$echo <- FALSE 
+    x}, 
+  
+  # Disable echo, message, and warning for chunks with "results_only = TRUE"
+  results_only = function(x) {
+    if (isTRUE(x$results_only)) {
+      x$echo    <- FALSE
+      x$message <- FALSE
+      x$warning <- FALSE} 
+    x}) 
 ```
 
-```{r}
+## Packages
+
+  1. Dependancies 
+
+The `ccl` package provides lab-specific functions used throughout this template, and `pacman` lets you install and load multiple packages at once. 
+
+```{r, echo_only = TRUE}
+# Install or update ccl package from GitHub 
+remotes::install_github(
+  "coexistence-conservation-lab/ccl", dependencies = FALSE)
+
+# Load pacman (manages package installation and loading in one step)
+library(pacman)
+```
+
+  2. Project-specific packages 
+
+```{r, echo_only = TRUE}
 # Install and load required packages
 pacman::p_load(
   
+  # Data import and export 
+  openxlsx, readxl, writexl, yaml, 
+  
   # Data wrangling
-  data.table, dplyr, grid, gridExtra, gtools, janitor, 
-  lubridate, readxl, RODBC, tidyr, tidyverse, 
+  data.table, dplyr, grid, gridExtra, gtools, 
+  janitor, lubridate, tidyr, tidyverse,
   
   # Mapping
-  ggspatial, raster, rgdal, sf, sp, 
+  ggspatial, ozmaps, raster, sf, sp, 
+  # rgdal is now deprecated
   
   # Plotting
   ggplot2, ggpmisc, ggpubr, plotrix, scales, viridis, 
@@ -58,40 +119,91 @@ pacman::p_load(
   adehabitatHR, adehabitatLT, MuMIn, wildlifeDI, 
   
   # Statistical modelling
-  AICcmodavg, brglm, corrplot, lme4)
+  AICcmodavg, beepr, brglm, corrplot, here, lme4)
 ```
 
-# **Data curation**
+```{r}
+# Load ccl after all other packages to avoid masking conflicts
+library(ccl)
 
-## Prepare data
+# Prevent other packages (e.g., cowplot) from masking dplyr functions
+select <- dplyr::select
+recode <- dplyr::recode
+```
+
+## Resources
+
+### Constants
+
+```{r}
+# Define file paths
+geo_in  <- "input/gis"
+geo_out <- "output/gis"
+```
+
+```{r}
+# Define MFGO centre coordinates
+mfgo_lat <- -35.184396
+mfgo_lon <- 149.171633
+
+# Define MFWS centre coordinates 
+mfws_lat <- -35.166447
+mfws_lon <- 149.166040
+```
+
+```{r}
+# Define CRS for WGS (lat/lon) and UTM (eastings/northings)
+wgs <- "EPSG:4326"
+utm <- "EPSG:32755"
+```
+
+```{r}
+# Define colours for areas of interest
+aoi_cols <- c(
+  "act" = "#fffe92",
+  "nsw" = "#289fc4" ,
+  "tas" = "#29a145",
+  "vic" = "#2011ce")
+```
+
+### Functions
+
+Load project-specific functions from `functions.R`. 
+
+```{r}
+# Load project-specific functions from functions.R and report loaded objects
+source(here::here("functions.R"))
+
+# Check functions loaded by testing convert_date()
+convert_date(c("2024-01-15", "45000", "2023-06-01 extra", "99999"))
+```
+
+# **Preparation**
+
+## Read data
 
 Firstly, we load the required packages and read in our GPS coordinate and environment data.
 
 ```{r, results = 'hide', warning = FALSE, message = FALSE}
-# Assign raw data filename to an object
-raw_data <- "input/data.xlsx"
-
 # Read in GPS data
 gps <- read_excel(raw_data, sheet = "coordinates") %>% 
   clean_names() %>% 
   na.omit() %>%
-  mutate(date_time = as.POSIXct(aest, format = "%d/%m/%Y %H:%M")) %>%
+  mutate(date_time = as.POSIXct(  aest, format = "%d/%m/%Y %H:%M")) %>%
   mutate(date      = as.Date(date_time, format = "%d/%m/%Y")) %>% 
   rename(temp      = temperature)
 
 # Read in environmental data
-enviro <- read_excel(raw_data, sheet = "environment") %>% 
+wea <- read_excel(raw_data, sheet = "weather") %>% 
   clean_names() %>%
   mutate(date = as.Date(as.POSIXct(day, format = "%d/%m/%Y")))
-
-# Combine GPS and environmental data
-coords <- left_join(gps, enviro, by = "date")
 ```
 
 Since (a) eastern quolls are active at night and (b) we configured the GPS units to collect fixes between 1700 and 0700 hours, we have simplified the categorisation of a 'quoll day' by subtracting 12 hrs from the real time each of fix so they fall on the same date. We also categorised each fix by `period`.
   
 ```{r}
-coords <- coords %>%
+# Combine GPS and environmental data
+coords <- left_join(gps, wea, by = "date") %>%
   
   # Minus 12 hrs from date_time
   mutate(date_time_12hr = as.character(date_time-12*60*60)) %>% 
@@ -108,7 +220,8 @@ coords <- coords %>%
   mutate(period         = 
            ifelse(night_12hr >= 3  & night_12hr <= 21, 'Baseline', 
            ifelse(night_12hr >= 22 & night_12hr <= 32, 'Release',
-           ifelse(night_12hr >= 33 & night_12hr <= 52, 'Settlement', NA)))) %>%
+           ifelse(night_12hr >= 33 & night_12hr <= 52, 'Settlement',
+                  NA)))) %>%
   
   subset(ifelse(
     cohort     == "Resident", 
@@ -129,51 +242,175 @@ We filtered the dataset by six variables, starting with the following four where
 
 ```{r}
 # Filter coordinates into four dataframes
-coords_q <- subset(coords,   quoll!      = 0)
+coords_q <- subset(coords,   quoll      != 0)
 coords_p <- subset(coords_q, deployment == "Field")
-coords_t <- subset(coords_p, trap!       = "Trap")
-coords_l <- subset(coords_t, longitude!  = 0) %>%
+coords_t <- subset(coords_p, trap       != "Trap")
+coords_l <- subset(coords_t, longitude  != 0) %>%
   mutate(
     easting  = as.numeric(easting),
     northing = as.numeric(northing))
 ```
 
-## Clip by MFWS fence
-
-Next, we use the [National Vegetation Information System (version 6.0)](http://www.environment.gov.au/fed/catalog/search/resource/details.page?uuid = %7Bab942d6d-9efd-4cf2-bec7-4c1521b83803%7D) major extant vegetation groups polygon (adapted for MFWS, see Habitat use section) to classify points as **inside** or **outside** the sanctuary.
-
-```{r, message = FALSE}
-mf_fence <- st_read("input/mfws_fence.shp", quiet = TRUE) %>%
-  
-  # Set projection using sf
-  st_set_crs("EPSG:32755") %>%
-  st_transform("EPSG:4326")
-
+```{r}
+# Convert coordinates to SPDF
 coords_sp <- SpatialPointsDataFrame( 
   data.frame(coords_l$longitude, coords_l$latitude), 
-  coords_l, proj4string = CRS("EPSG:4326")) %>% 
+  coords_l, 
+  proj4string = CRS(wgs)) %>% 
   st_as_sf()
+```
+
+## Areas of interest
+
+```{r}
+# Read in MFGO boundary and assign projection
+mfgo_poly <- read_gpkg("mfgo_boundaries.gpkg") %>%
+  st_transform(wgs)
+
+# Subset to MFGO (GS + MFWS)
+mfgo <- mfgo_poly %>%
+  filter(site %in% c(
+    "Goorooyarroo Sanctuary", 
+    "Mulligans Flat Woodland Sanctuary"))
+
+# Subset to MFWS
+mfws <- mfgo_poly %>%
+  filter(site == "Mulligans Flat Woodland Sanctuary")
 
 # Filter fixes to those inside MFWS
-coords_filt <- st_filter(coords_sp, mf_fence) 
+coords_filt <- st_filter(coords_sp, mfws) 
+```
 
-nvis <- st_read(
-  "input/mfws_nvis_vegetation_groups.shp", quiet = TRUE) %>%
-  st_transform("EPSG:4326")
+```{r}
+# Fetch Australian state boundaries 
+aus <- ozmap_states |>
+  st_transform(st_crs(wgs)) |>
+  mutate(NAME = recode(NAME,
+    "Australian Capital Territory" = "act",
+    "New South Wales"              = "nsw",
+    "Northern Territory"           = "nt",
+    "Queensland"                   = "qld",
+    "South Australia"              = "sa",
+    "Tasmania"                     = "tas",
+    "Victoria"                     = "vic",
+    "Western Australia"            = "wa"))
 
-nvis_info <- read.csv("input/mfws_nvis_vegetation_groups.csv") %>%
+# Subset to AOIs
+act  <- aus |> filter(NAME == "act")
+nsw  <- aus |> filter(NAME == "nsw")
+seat <- aus |> filter(NAME %in% c("act", "nsw", "tas", "vic"))
+
+# Print bounding box
+st_bbox(seat)
+```
+
+## NVIS
+
+Here we use the [National Vegetation Information System (v6.0, now superseded by v7.0)](https://fed.dcceew.gov.au/datasets/be9930d6de354ace93fd1aa5d34a71de/about) major extant vegetation groups polygon (adapted for MFWS, see **Habitat use** section) to classify points as **inside** or **outside** the sanctuary.
+
+### Convert GDB to GPKG
+
+```{r, eval = FALSE}
+# Check available layers in the NVIS vector geodatabase 🐢
+st_layers(dsn = file.path(geo_in, "nvis/NVIS_V7_0_VECTOR_STATE_FILES_EXT.gdb"))
+
+# Write ACT layer to .gpkg 🐢🐢🐢
+sf::gdal_utils(
+  util        = "vectortranslate",
+  source      = file.path(geo_in, "nvis/NVIS_V7_0_VECTOR_STATE_FILES_EXT.gdb"),
+  destination = file.path(geo_in, "act_nvis.gpkg"),
+  options     = c("-f", "GPKG", "-overwrite",
+                  "-sql", "SELECT * FROM NVIS7_0_AUST_EXT_ACT")); beep(sound)
+
+# Read ACT NVIS layer 🐢
+act_nvis <- st_read(file.path(geo_in, "act_nvis.gpkg")) %>%
+  st_transform(wgs) %>%
+  st_make_valid(); beep(1)
+
+# Replace raw GDAL output with projected and valid vector
+st_write(
+  act_nvis,
+  dsn    = file.path(geo_in, "act_nvis.gpkg"),
+  layer  = "act_nvis",
+  driver = "GPKG", 
+  append = FALSE, 
+  quiet  = TRUE)
+```
+
+Fetch MVG and MVS lookup table.
+
+```{r, eval = FALSE}
+# Read ACT NVIS attributes only (no geometry) to get present MVS codes
+act_nvis_att <- st_read(
+  file.path(geo_in, "act_nvis.gpkg")) |>
+  st_drop_geometry()
+
+# Read the flat lookup table containing MVG and MVS codes and names
+nvis_lu <- st_read(
+  dsn   = file.path(geo_in, "nvis/NVIS_V7_0_VECTOR_STATE_FILES_EXT.gdb"),
+  layer = "NVIS7_0_LUT_AUST_FLAT"); beep(sound)
+
+# Extract all NVIS_IDs present in ACT spatial layer
+act_ids <- act_nvis_att |>
+  select(starts_with("NVISDSC")) |>
+  unlist() |>
+  unique() |>
+  na.omit()
+
+# Filter lookup to only records present in ACT, keeping MVG/MVS columns
+act_nvis_lu <- nvis_lu |>
+  filter(NVIS_ID %in% act_ids) |>
+  select(NVIS_ID, L5_ASSOCIATION, MVG_NUMBER, MVG_NAME, MVS_NUMBER, MVS_NAME)
+```
+
+### Clip to MFGO and MFWS
+
+```{r}
+# Read ACT NVIS layer 🐢
+act_nvis <- st_read(file.path(geo_in, "act_nvis.gpkg"), quiet = TRUE) %>%
+  st_transform(wgs) %>%
+  st_make_valid(); beep(1)
+
+# Clip NVIS to MFGO boundary and write to .gpkg 🐢
+mfgo_nvis <- act_nvis |> st_intersection(mfgo)
+st_write(
+  mfgo_nvis,
+  dsn    = file.path(geo_in, "mfgo_nvis.gpkg"),
+  layer  = "mfgo_nvis",
+  driver = "GPKG", 
+  append = FALSE, 
+  quiet  = TRUE)
+
+# Clip NVIS to MFWS boundary and write to .gpkg 🐢
+mfws_nvis <- act_nvis |> st_intersection(mfws)
+st_write(
+  mfws_nvis,
+  dsn    = file.path(geo_in, "mfws_nvis.gpkg"),
+  layer  = "mfws_nvis",
+  driver = "GPKG", 
+  append = FALSE, 
+  quiet  = TRUE)
+```
+
+```{r, message = FALSE}
+nvis_dat <- read_excel(raw_data, sheet = "nvis") %>%
   clean_names() %>%
-  dplyr::select(c(
-    id, 
+  
+  # Subset to relevant version
+  filter(nvis_version == 6) %>%
+
+  # Select and rename columns
+  select(
+    mvg_n        = mvg_number, 
     nvis_habitat = mvg_name, 
-    mfws_habitat = mfws_name))
+    mfws_habitat = mfgo_name)
 
 # Annotate polygon data to GPS df
 coords_annotated <- coords_sp %>% 
   
-  mutate(id = as.numeric(st_intersects(coords_sp, nvis))) %>%
+  mutate(mvg_n = as.numeric(st_intersects(coords_sp, mfws_nvis))) %>%
   st_drop_geometry() %>% 
-  left_join(nvis_info, by = "id") %>%
+  left_join(nvis_dat, by = "mvg_n") %>%
   
   mutate(fence = factor(
     ifelse(!is.na(mfws_habitat), "Inside", "Outside"), 
@@ -182,18 +419,22 @@ coords_annotated <- coords_sp %>%
 
 We checked this worked by mapping the coordinates.
 
-```{r, message = FALSE, fig.align = "center"}
+```{r, message = FALSE}
 # Read in MFWS shapefile
-mfws <- readOGR(dsn = "input/mfws_fence.shp", verbose = FALSE) %>%
+mfws <- readOGR(
+  dsn = file.path(geo_in, "mfws_fence.shp"), verbose = FALSE) %>%
   
   # Set projection using rgdal
   spTransform(CRS("+proj = utm +zone = 55 +datum = WGS84")) %>%
   
   # Transform from from sp to df
   fortify(verbose = FALSE) %>% 
-  mutate(lat      = as.numeric(lat + 10000000), 
-         long     = as.numeric(long))
+  mutate(
+    lat  = as.numeric(lat + 10000000), 
+    long = as.numeric(long))
+```
 
+```{r, message = FALSE, fig.align = "center"}
 # Plot coordinates 
 ggplot() + 
   geom_path(
@@ -219,13 +460,13 @@ ggplot() +
   theme(
     panel.grid.major = element_blank(), 
     panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
+    panel.border     = element_blank(),
     panel.background = element_rect(fill = "white"),
-    axis.text.x = element_blank(), 
-    axis.text.y = element_blank(), 
-    axis.ticks.x = element_blank(),
-    axis.ticks.y = element_blank(),
-    legend.key = element_blank()) +
+    axis.text.x      = element_blank(), 
+    axis.text.y      = element_blank(), 
+    axis.ticks.x     = element_blank(),
+    axis.ticks.y     = element_blank(),
+    legend.key       = element_blank()) +
   
   scale_colour_manual(
     values = viridis(3, begin = 0.9, end = 0.1), 
@@ -591,7 +832,7 @@ data <- distance_night %>%
     date_12hr, format = "%Y-%m-%d", tz = "Australia/Sydney")))
 
 # Read in environmental covariates
-enviro <- read_excel(raw_data, sheet = "environment") %>% 
+wea <- read_excel(raw_data, sheet = "environment") %>% 
   clean_names() %>%
   
   mutate(date_12hr = as.POSIXct(strptime(day, format = "%Y-%m-%d"))) %>%
@@ -731,7 +972,7 @@ We will add to a grid of figures along with the home and core range results belo
 
 We used the kernel utilisation distribution (KUD) model to calculate `home` ranges (eliminating outlying, exploratory locations, 95% contour) and `core` areas (area used with greater intensity, 50% contour). We  calculate ranges per *night*, *individual*, and *period*.
 
-### Range per night
+### Per night
 
 ```{r}
 # Read coordinates data
@@ -797,11 +1038,11 @@ ranges_day <- read.csv("output/raw ranges per day.csv") %>%
 
 # Create lookup table for study day and night numbers
 ranges_data <- data %>% 
-  dplyr::select(night_date, night_12hr, day_12hr) %>%
+  select(night_date, night_12hr, day_12hr) %>%
   group_by(night_date, night_12hr, day_12hr) %>%
   summarise(n = length(night_12hr)) %>%
   merge(ranges_day, by = "night_date") %>%
-  dplyr::select(-n)
+  select(-n)
 
 # Create lookup table to add cohort and morph back in
 periods <- read.csv("output/coordinates curated.csv") %>%
@@ -826,7 +1067,7 @@ ranges_data <- ranges_data %>%
 write.csv(ranges_data,"output/ranges per day.csv")
 ```
 
-### Range per individual
+### Per individual
 
 ```{r}
 # Read in coordinates data
@@ -840,12 +1081,12 @@ kud <- kernelUD(coords[,6], h = "href", grid = 500)
 # Calculate home range from coordinates
 home_range <- getverticeshr(kud, percent = 95) %>% 
   st_as_sf() %>% #convert df to spatial object
-  st_set_crs(st_crs("EPSG:32755")) #set CRS to UTM
+  st_set_crs(st_crs(utm)) #set CRS to UTM
 
 # Calculate core range from coordinates
 core_range <- getverticeshr(kud, percent = 50) %>% #core range 50% 
   st_as_sf() %>% #convert df to spatial object
-  st_set_crs(st_crs("EPSG:32755")) #set CRS to UTM
+  st_set_crs(st_crs(utm)) #set CRS to UTM
 
 # Extract areas
 ranges_study <- data.frame(left_join(
@@ -861,7 +1102,7 @@ ranges_study <- data.frame(left_join(
   mutate(period = "Study")
 ```
 
-### Range per period
+### Per period
 
 ```{r, eval = FALSE}
 # Read in coordinates data
@@ -886,7 +1127,7 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
         kernelUD(h = "href", grid = 500, extent = 10) %>%
         getverticeshr(percent = 95) %>%
         st_as_sf() %>% #convert from dataframe to a spatial object
-        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        st_set_crs(st_crs(utm)) %>% #set CRS to utm
         mutate(period = "Baseline"))
   print(baseline)
   
@@ -898,7 +1139,7 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
         kernelUD(h = "href", grid = 500, extent = 10) %>%
         getverticeshr(percent = 95) %>%
         st_as_sf() %>% #convert from dataframe to a spatial object
-        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        st_set_crs(st_crs(utm)) %>% #set CRS to utm
         mutate(period = "Release"))
   print(release)
   
@@ -912,7 +1153,7 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
         kernelUD(h = "href", grid = 500, extent = 10) %>%
         getverticeshr(percent = 95) %>%
         st_as_sf() %>% #convert from dataframe to a spatial object
-        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        st_set_crs(st_crs(utm)) %>% #set CRS to utm
         mutate(period = "Settlement"))
   print(settlement)
   
@@ -931,7 +1172,7 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
         kernelUD(h = "href", grid = 500, extent = 10) %>%
         getverticeshr(percent = 50) %>%
         st_as_sf() %>% #convert from dataframe to a spatial object
-        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        st_set_crs(st_crs(utm)) %>% #set CRS to utm
         mutate(period = "Baseline"))
   print(baseline)
   cr <- rbind.data.frame(cr, baseline)
@@ -942,7 +1183,7 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
         kernelUD(h = "href", grid = 500, extent = 10) %>%
         getverticeshr(percent = 50) %>%
         st_as_sf() %>% #convert from dataframe to a spatial object
-        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        st_set_crs(st_crs(utm)) %>% #set CRS to utm
         mutate(period = "Release"))
   print(release)
   cr <- rbind.data.frame(cr, release)
@@ -953,7 +1194,7 @@ for (i in seq_along(quolls)) { #errors for NULL coordinates are okay
         kernelUD(h = "href", grid = 500, extent = 10) %>%
         getverticeshr(percent = 50) %>%
         st_as_sf() %>% #convert from dataframe to a spatial object
-        st_set_crs(st_crs("EPSG:32755")) %>% #set CRS to utm
+        st_set_crs(st_crs(utm)) %>% #set CRS to utm
         mutate(period = "Settlement"))
   print(settlement)
   cr <- rbind.data.frame(cr, settlement)
@@ -1010,7 +1251,7 @@ Next we use generalised linear mixed-effects models (GLMMs) to test the fixed ef
 
 ```{r}
 random_effects <- model_data %>%
-  dplyr::select(
+  select(
     night_12hr, 
     day, 
     min_temp, 
@@ -1111,7 +1352,7 @@ Compile range shapefiles
 
 ```{r}
 lookup_distinct <- as.data.frame(lookup) %>% 
-  dplyr::select(-period, -fixes) %>%
+  select(-period, -fixes) %>%
   distinct(id = name, cohort, morph) 
 
 hr_lookup <- home_range %>% 
@@ -1225,7 +1466,7 @@ for(i in 1:length(list)) {
 home_overlap <- out %>% 
   mutate(area_int = as.numeric(st_area(.))*0.0001) %>%
   rename(name = id, name2 = id.1, overlap = area_int) %>%
-  dplyr::select(-area, -area.1)
+  select(-area, -area.1)
 ```
 
 ```{r, eval = FALSE, results = 'hide'}
@@ -1250,7 +1491,7 @@ core_overlap <- out %>%
     name2 = id.1, 
     overlap = area_int) %>%
   
-  dplyr::select(-area, -area.1)
+  select(-area, -area.1)
 ```
 
 ```{r, eval = FALSE, results = 'hide'}
@@ -1547,7 +1788,7 @@ dev.off()
 
 Here we investigated eastern quoll nocturnal activity (GPS fixes) and diurnal denning (VHF fixes), in terms of habitat type (NVIS polygons) and habitat attributes (LiDAR rasters).
 
-Firstly, we used the [National Vegetation Information System (version 6.0)](http://www.environment.gov.au/fed/catalog/search/resource/details.page?uuid = %7Bab942d6d-9efd-4cf2-bec7-4c1521b83803%7D) major extant vegetation groups we created earlier ('Clip by MFWS fence' section) to create five broad habitat types relevant to MFWS. Below we visualised how the eight NVIS vegetation groups were aggregated into the five MFWS habitat types by **barplot** and **map**.
+Firstly, we used the [National Vegetation Information System (version 6.0)](https://fed.dcceew.gov.au/datasets/3c61b492c8e644dd9207b412ed87a659/about) major extant vegetation groups we created earlier ('Clip by MFWS fence' section) to create five broad habitat types relevant to MFWS. Below we visualised how the eight NVIS vegetation groups were aggregated into the five MFWS habitat types by **barplot** and **map**.
 
 ```{r, warning = FALSE, fig.align = "center", fig.width = 6, fig.height = 6}
 nvis_shp <- readOGR(dsn = "input/mfws_nvis_vegetation_groups.shp") %>%
@@ -1564,7 +1805,7 @@ nvis_groups <- aggregate(
 
 nvis_groups <- nvis_groups %>% 
   mutate(area = x, perc = (area/4.839729)*100) %>%
-  dplyr::select(-3) %>% na.omit() %>%
+  select(-3) %>% na.omit() %>%
   mutate(nvis_habitat = factor(
     nvis_habitat, 
     levels = c(
@@ -1648,7 +1889,7 @@ nvis_barplot <- ggplot(
 ```{r, warning = FALSE, fig.align = "center", fig.width = 6, fig.height = 6}
 # Map plot
 nvis <- st_read("input/mfws_nvis_vegetation_groups.shp") %>%
-  st_transform("EPSG:4326") %>% 
+  st_transform(wgs) %>% 
   clean_names() %>% 
   mutate(mfws_name = factor(
     mfws_name, 
@@ -1659,7 +1900,7 @@ nvis <- st_read("input/mfws_nvis_vegetation_groups.shp") %>%
       "Grassland", 
       "Aquatic")))
 
-nvis_mfws <- ggplot() + 
+mfws_nvis <- ggplot() + 
   geom_sf(
     st_zm(nvis), 
     mapping = aes(fill = mfws_name), 
@@ -1705,12 +1946,12 @@ nvis_mfws <- ggplot() +
   scale_fill_manual(values = viridis(5, begin = 0.9, end = 0.1)) +
   
   labs(fill = "MFWS habitat", x = NULL, y = NULL) 
-print(nvis_mfws)
+print(mfws_nvis)
 
 
 nvis_methods <- ggarrange(
   nvis_barplot, 
-  nvis_mfws, 
+  mfws_nvis, 
   ncol = 2, 
   nrow = 1, 
   widths = c(4.75, 3))
@@ -1813,7 +2054,7 @@ noc <- read.csv("output/coordinates curated.csv") %>%
 # Convert and project coordinates as spatial points using sp
 noc_sp <- SpatialPointsDataFrame( 
     data.frame(noc$easting, noc$northing), noc,
-    proj4string = CRS("EPSG:32755")) %>% 
+    proj4string = CRS(utm)) %>% 
   st_as_sf()
 
 # Extract raster values for each coordinate
@@ -1834,41 +2075,36 @@ noc_lidar <- noc_sp %>%
 To determine whether the overstory, understory, and aspect values for each individual's location is related to availability or preference, we need to compare them with the available values in Mulligans Flat.
 
 ```{r}
-# Read in MFWS fence polygon using sf
-mf_fence <- st_read("input/mfws_fence.shp", quiet = TRUE) %>%
-  st_set_crs("EPSG:32755")
-
 # Extract available overstory in MFWS
-overstory_mf <- as.data.frame(rasterToPoints(mask(overstory, mf_fence))) %>%
+overstory_mf <- as.data.frame(rasterToPoints(mask(overstory, mfws))) %>%
   mutate(
-    type = "Available", 
-    raster = "Overstory", 
+    type         = "Available", 
+    raster       = "Overstory", 
     raster_units = mfgo_overstory*100) %>%
-  dplyr::select(type, raster, raster_units)
+  select(type, raster, raster_units)
 
 # Extract available understory in MFWS
-understory_mf <- as.data.frame(rasterToPoints(mask(understory, mf_fence))) %>%
+understory_mf <- as.data.frame(rasterToPoints(mask(understory, mfws))) %>%
   mutate(
-    type = "Available", 
-    raster = "Understory",
+    type         = "Available", 
+    raster       = "Understory",
     raster_units = mfgo_understory*100) %>%
-  dplyr::select(type, raster, raster_units)
+  select(type, raster, raster_units)
 
 # Extract available aspects in MFWS
-aspect_mf <- as.data.frame(rasterToPoints(mask(aspect, mf_fence))) %>%
+aspect_mf <- as.data.frame(rasterToPoints(mask(aspect, mfws))) %>%
   mutate(
-    type = "Available", 
-    raster = "Aspect",
+    type         = "Available", 
+    raster       = "Aspect",
     raster_units = mfgo_aspect) %>%
-  dplyr::select(type, raster, raster_units) 
+  select(type, raster, raster_units) 
 
 # Combine raster values into single df
 raster_mf <- rbind(
   overstory_mf, 
   understory_mf, 
   aspect_mf) %>%
-  
-  dplyr::select(type, raster, raster_units)
+  select(type, raster, raster_units)
 ```
 
 ### Models and summaries
@@ -1881,14 +2117,14 @@ We found the distribution of eastern quoll locations in each habitat type varied
 
 ```{r}
 noc_use <- noc_plot %>%
-  dplyr::select(mfws_habitat, freq, area) %>%
+  select(mfws_habitat, freq, area) %>%
   mutate(
-    observed = freq,
+    observed   = freq,
     
     # Create proportion of MFWS minus aquatic habitat
     proportion = area/sum(noc_plot$area), 
-    expected = proportion*sum(noc_plot$freq)) %>%
-  dplyr::select(-freq)
+    expected   = proportion*sum(noc_plot$freq)) %>%
+  select(-freq)
 
 plotdat <- gather(noc_use, type, value, observed, expected)
 
@@ -1897,9 +2133,9 @@ chi_plot <- ggplot(
   plotdat, 
   aes(mfws_habitat, 
       value, 
-      fill = type)) +
+      fill   = type)) +
   geom_bar(
-    stat = "identity", 
+    stat     = "identity", 
     position = 'dodge')
 chi_plot
 
@@ -1917,7 +2153,8 @@ woodland <- subset(
 
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
-    (1|name), data = woodland))), 
+    (1|name), 
+  data   = woodland))), 
   digits = 4)
 
 forest <- subset(
@@ -1926,7 +2163,8 @@ forest <- subset(
 
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
-    (1|name), data = forest))), 
+    (1|name), 
+  data   = forest))), 
   digits = 4)
 
 regrowth <- subset(
@@ -1935,7 +2173,8 @@ regrowth <- subset(
 
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
-    (1|name), data = regrowth))), 
+    (1|name), 
+  data   = regrowth))), 
   digits = 4)
 
 grassland <- subset(
@@ -1944,7 +2183,8 @@ grassland <- subset(
 
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
-    (1|name), data = grassland))), 
+    (1|name), 
+  data   = grassland))), 
   digits = 4)
 ```
 
@@ -2026,27 +2266,30 @@ Similarly, we calculated the frequency of diurnal dens (VHF fixes) per habitat t
 diu <- read_excel(raw_data, sheet = "dens") %>% 
   clean_names() %>% 
   na.omit() %>%
-  
   mutate(
-    easting = as.numeric(easting), 
+    easting  = as.numeric(easting), 
     northing = as.numeric(northing), 
-    date = as.POSIXct(date_tracked), 
-    day = as.numeric(yday(date)), #day of the year variable
-    night = (as.numeric(yday(date)) - 157), #night variable)
-    period = ifelse(night >= 3  & night <= 21, 'Baseline', 
-             ifelse(night >= 22 & night <= 32, 'Release',
-             ifelse(night >= 33 & night <= 52, 'Settlement', NA)))) %>%
+    date     = as.POSIXct(date_tracked), 
+    day      = as.numeric(yday(date)), #day of the year variable
+    night    = (as.numeric(yday(date)) - 157), #night variable)
+    period   = ifelse(night >= 3  & night <= 21, 'Baseline', 
+               ifelse(night >= 22 & night <= 32, 'Release',
+               ifelse(night >= 33 & night <= 52, 'Settlement', NA)))) %>%
   
   # Remove irrelevant dates
   subset(night >= 3 & night <= 52) %>% 
-  subset(ifelse(cohort == "Resident", night <= 32, night >= 22))
+  subset(ifelse(
+    cohort == "Resident", 
+    night  <= 32, 
+    night  >= 22))
 
 diu_sp <- SpatialPointsDataFrame( #library(sp)
   data.frame(diu$easting, diu$northing), diu,
-  proj4string = CRS("EPSG:32755")) %>% st_as_sf()
+  proj4string = CRS(utm)) %>% 
+  st_as_sf()
 
 nvis <- st_read("input/mfws_nvis_vegetation_groups.shp", quiet = TRUE) %>%
-  st_transform("EPSG:32755")
+  st_transform(utm)
 
 diu_nvis <- st_join(diu_sp, nvis, join = st_intersects) %>%
   rename(mfws_habitat = MFWS_NAME) %>% 
@@ -2054,16 +2297,18 @@ diu_nvis <- st_join(diu_sp, nvis, join = st_intersects) %>%
 
 diu_adj <- diu_nvis %>%
   group_by(mfws_habitat) %>% count() %>% 
-  mutate(freq = n, perc = (freq/413)*100) #adjusted by frequency of dens
+  mutate(
+    freq = n, 
+    perc = (freq/413)*100) #adjusted by frequency of dens
 
 diu_plot <- diu_adj %>% clean_names() %>%
   left_join(mfws_group, by = "mfws_habitat") %>%
   mutate(
-    freq_adj = freq/area, #adjusted by total area
-    perc_adj = (freq_adj/383.1) *100, #adjusted by total freq_adj
+    freq_adj     = freq/area, #adjusted by total area
+    perc_adj     = (freq_adj/383.1) *100, #adjusted by total freq_adj
     mfws_habitat = factor(
       mfws_habitat, 
-      levels = c(
+      levels     = c(
         "Eucalypt woodland", 
         "Eucalypt forest", 
         "Regrowth", 
@@ -2081,10 +2326,10 @@ diu_total <- diu_period %>%
   
 diu_model <- left_join(diu_period, diu_total) %>%
   mutate(
-    percentage = (100/total)*dens, 
+    percentage   = (100/total)*dens, 
     mfws_habitat = factor(
       mfws_habitat, 
-      levels = c(
+      levels     = c(
         "Eucalypt woodland", 
         "Eucalypt forest", 
         "Regrowth", 
@@ -2118,7 +2363,7 @@ diu <- read_excel(raw_data, sheet = "dens") %>%
 
 diu_sp <- SpatialPointsDataFrame( 
   data.frame(diu$easting, diu$northing), diu,
-  proj4string = CRS("EPSG:32755")) %>% 
+  proj4string = CRS(utm)) %>% 
   st_as_sf()
 
 diu_lidar <- diu_sp %>%
@@ -2139,12 +2384,12 @@ We found the distribution of eastern quoll dens in each habitat type varied sign
 
 ```{r}
 diu_use <- diu_plot %>%
-  dplyr::select(mfws_habitat, freq, area) %>%
+  select(mfws_habitat, freq, area) %>%
   mutate(
     observed   = freq, 
     proportion = area/sum(diu_plot$area), #area of MFWS minus aquatic habitat
     expected   = proportion*sum(diu_plot$freq)) %>%
-  dplyr::select(-freq)
+  select(-freq)
 
 plotdat  <- gather(diu_use, type, value, observed, expected)
 
@@ -2155,13 +2400,13 @@ chi_plot <- ggplot(
       fill = type)) +
   
   geom_bar(
-    stat = "identity", 
+    stat     = "identity", 
     position = 'dodge')
 chi_plot
 
 chisq.test(
   diu_use$observed, 
-  p = diu_use$proportion, 
+  p       = diu_use$proportion, 
   correct = TRUE)
 ```
 
@@ -2177,7 +2422,7 @@ woodland <- subset(
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
     (1|name), 
-  data = woodland))), 
+  data   = woodland))), 
   digits = 4)
 
 forest <- subset(
@@ -2187,7 +2432,7 @@ forest <- subset(
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
     (1|name), 
-  data = forest))), 
+  data   = forest))), 
   digits = 4)
 
 regrowth <- subset(
@@ -2197,7 +2442,7 @@ regrowth <- subset(
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
     (1|name),
-  data = regrowth))), 
+  data   = regrowth))), 
   digits = 4)
 
 grassland <- subset(
@@ -2207,7 +2452,7 @@ grassland <- subset(
 round(coef(summary(lmer(
   percentage ~ cohort*period + morph + 
     (1|name), 
-  data = grassland))), 
+  data   = grassland))), 
   digits = 4)
 ```
 
@@ -2217,19 +2462,19 @@ Next, we used GLMMs to test the fixed effects of `cohort`, `period`, and `morph`
 round(coef(summary(lmer(
   overstory ~ cohort*period + morph + 
     (1|name), 
-  data = diu_lidar))), 
+  data   = diu_lidar))), 
   digits = 4)
 
 round(coef(summary(lmer(
   understory ~ cohort*period + morph + 
     (1|name), 
-  data = diu_lidar))), 
+  data   = diu_lidar))), 
   digits = 4)
 
 round(coef(summary(lmer(
   aspect ~ cohort*period + morph + 
     (1|name), 
-  data = diu_lidar))), 
+  data   = diu_lidar))), 
   digits = 4)
 ```
 
@@ -2293,7 +2538,7 @@ noc_lidar_plot <- noc_lidar %>%
     raster = factor(raster, levels = c("Overstory", "Understory", "Aspect")),
     type   = "Nocturnal activity") %>%
   
-  dplyr::select(quoll, cohort, period, morph, 
+  select(quoll, cohort, period, morph, 
                 day, raster, raster_units, type)
 
 diu_lidar_plot <- diu_lidar %>%
@@ -2312,16 +2557,16 @@ diu_lidar_plot <- diu_lidar %>%
   mutate(
     cohort = factor(cohort, levels = c("Resident", "Reinforcer")), 
     raster = factor(raster, levels = c("Overstory", "Understory", "Aspect")),
-    type = "Diurnal denning") %>%
+    type   = "Diurnal denning") %>%
   
-  dplyr::select(
+  select(
     quoll, cohort, period, morph, day, raster, raster_units, type)
 
 lidar_plot <- rbind(noc_lidar_plot, diu_lidar_plot) %>%
   
-  mutate(type = factor(
+  mutate(type    = factor(
     type, levels = c("Nocturnal activity", "Diurnal denning"))) %>%
-  dplyr::select("type", "raster", "raster_units") %>%
+  select("type", "raster", "raster_units") %>%
   rbind(raster_mf)
 ```
 
@@ -2369,17 +2614,17 @@ lidar_as <- subset(lidar_plot, raster == "Aspect")
 
 round(coef(summary(glm(
   raster_units ~ type, 
-  data = lidar_os))), 
+  data   = lidar_os))), 
   digits = 5)
 
 round(coef(summary(glm(
   raster_units ~ type, 
-  data = lidar_us))), 
+  data   = lidar_us))), 
   digits = 5)
 
 round(coef(summary(glm(
   raster_units ~ type, 
-  data = lidar_as))), 
+  data   = lidar_as))), 
   digits = 5)
 ```
 
@@ -2393,14 +2638,14 @@ Finally, we plot frequency of fixes (with percentages) adjusted for habitat avai
 noc_nvis_plot <- ggplot(
   noc_plot, 
   aes(
-    x = mfws_habitat, 
-    y = freq_adj,
-    fill = mfws_habitat), 
-  col = "grey30") + 
+    x     = mfws_habitat, 
+    y     = freq_adj,
+    fill  = mfws_habitat), 
+  col     = "grey30") + 
   
   geom_col(
-    size = 0.5, 
-    col = "grey30", 
+    size  = 0.5, 
+    col   = "grey30", 
     alpha = 0.8) +
   
   geom_text(aes(
@@ -2408,12 +2653,12 @@ noc_nvis_plot <- ggplot(
     vjust = -0.5)) +
   
   annotate(
-    geom = "text", 
-    x = 1, 
-    y = 1500, 
+    geom  = "text", 
+    x     = 1, 
+    y     = 1500, 
     label = "a", 
     fontface = "bold", 
-    size = 4) +
+    size  = 4) +
   
   theme(
     panel.grid.major = element_blank(),
@@ -2446,14 +2691,14 @@ print(noc_nvis_plot)
 diu_nvis_plot <- ggplot(
   diu_plot, 
   aes(
-    x = mfws_habitat, 
-    y = freq_adj,
-    fill = mfws_habitat), 
-  col = "grey30") + 
+    x     = mfws_habitat, 
+    y     = freq_adj,
+    fill  = mfws_habitat), 
+  col     = "grey30") + 
   
   geom_col(
-    size = 0.5, 
-    col = "grey30", 
+    size  = 0.5, 
+    col   = "grey30", 
     alpha = 0.8) +
   
   geom_text(aes(
@@ -2506,11 +2751,11 @@ annotate_figure(
 
 ```{r, include = FALSE}
 tiff(
-  file = "output/Fig 4a–b (habitat type frequency).tiff", 
-  width = 2100, 
+  file   = "output/Fig 4a–b (habitat type frequency).tiff", 
+  width  = 2100, 
   height = 1000, 
-  units = "px", 
-  res = 300)
+  units  = "px", 
+  res    = 300)
 print(nvis_plot)
 
 annotate_figure(
@@ -2521,180 +2766,419 @@ dev.off()
 
 #### Habitat attributes
 
-```{r, fig.align = "center", fig.width = 9, fig.height = 3}
+```{r}
 lidar_os <- subset(lidar_plot, raster == "Overstory")
 lidar_us <- subset(lidar_plot, raster == "Understory")
 lidar_as <- subset(lidar_plot, raster == "Aspect")
+```
 
-lidar_os_plot <- ggplot(data = lidar_os, 
-                        aes(x = type, y = raster_units)) +
-  geom_violin(position = pos, aes(fill = type), 
-              col = "grey30", alpha = 0.7, width = 1.25, lwd = 0.6) +
-  geom_boxplot(position = pos, aes(col = type), 
-               fill = "grey30", width = 0.03, lwd = 0.6) +
-  stat_summary(position = pos, aes(col = type), 
-               fun = "median", geom = "point", 
-               fill = "white", shape = 21, size = 1.5, stroke = 1) +
-  annotate(geom = "text", x = 3.4, y = 75, label = "a", fontface = "bold", size = 5) +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill = "white"),
-        axis.line = element_line(colour = "black"),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        legend.position = "none") +
+```{r, fig.align = "center", fig.width = 9, fig.height = 3}
+lidar_os_plot <- ggplot(
+  data = lidar_os, 
+  aes(x = type, 
+      y = raster_units)) +
+  
+  geom_violin(
+    position = pos, 
+    aes(fill = type), 
+    col = "grey30", 
+    alpha = 0.7, 
+    width = 1.25, 
+    lwd = 0.6) +
+  
+  geom_boxplot(
+    position = pos, 
+    aes(col = type), 
+    fill = "grey30", 
+    width = 0.03, 
+    lwd = 0.6) +
+  
+  stat_summary(
+    position = pos, 
+    aes(col = type), 
+    fun = "median", 
+    geom = "point", 
+    fill = "white", 
+    shape = 21, 
+    size = 1.5, 
+    stroke = 1) +
+  
+  annotate(
+    geom = "text", 
+    x = 3.4, 
+    y = 75, 
+    label = "a", 
+    fontface = "bold", 
+    size = 5) +
+  
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none") +
+  
   scale_colour_manual(values = c("grey30","grey30","grey30")) +
-  scale_fill_manual(values = viridis(3, begin = 0.9, end = 0.1)) +
-  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
-  xlab("") + ylab("Overstory cover (%)")
+  scale_fill_manual(  values = viridis(3, begin = 0.9, end = 0.1)) +
+  scale_x_discrete(   labels = wrap_format(3)) + #library(scales) +
+  xlab("") + 
+  ylab("Overstory cover (%)")
+
 print(lidar_os_plot)
+```
 
-lidar_us_plot <- ggplot(data = lidar_us, 
-                         aes(x = type, y = raster_units)) +
-  geom_violin(position = pos, aes(fill = type), 
-              col = "grey30", alpha = 0.7, width = 1.25, lwd = 0.6) +
-  geom_boxplot(position = pos, aes(col = type), 
-               fill = "grey30", width = 0.03, lwd = 0.6) +
-  stat_summary(position = pos, aes(col = type), 
-               fun = "median", geom = "point", 
-               fill = "white", shape = 21, size = 1.5, stroke = 1) +
-  annotate(geom = "text", x = 3.4, y = 40, label = "b", fontface = "bold", size = 5) +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill = "white"),
-        axis.line = element_line(colour = "black"),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        legend.position = "none") +
+```{r, fig.align = "center", fig.width = 9, fig.height = 3}
+lidar_us_plot <- ggplot(
+  data = lidar_us, 
+  aes(x = type, 
+      y = raster_units)) +
+  
+  geom_violin(
+    position = pos, 
+    aes(fill = type), 
+    col = "grey30", 
+    alpha = 0.7, 
+    width = 1.25, 
+    lwd = 0.6) +
+  
+  geom_boxplot(
+    position = pos, 
+    aes(col = type), 
+    fill = "grey30", 
+    width = 0.03, 
+    lwd = 0.6) +
+  
+  stat_summary(
+    position = pos, 
+    aes(col = type), 
+    fun = "median", 
+    geom = "point", 
+    fill = "white", 
+    shape = 21, 
+    size = 1.5, 
+    stroke = 1) +
+  
+  annotate(
+    geom = "text", 
+    x = 3.4, 
+    y = 40, 
+    label = "b", 
+    fontface = "bold", 
+    size = 5) +
+  
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none") +
+  
   scale_colour_manual(values = c("grey30","grey30","grey30")) +
-  scale_fill_manual(values = viridis(3, begin = 0.9, end = 0.1)) +
-  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
-  xlab("") + ylab("Understory cover (%)")
+  scale_fill_manual(  values = viridis(3, begin = 0.9, end = 0.1)) +
+  scale_x_discrete(   labels = wrap_format(3)) + #library(scales) +
+  
+  xlab("") + 
+  ylab("Understory cover (%)")
+
 print(lidar_us_plot)
+```
 
-lidar_as_plot <- ggplot(data = lidar_as, 
-                        aes(x = type, y = raster_units)) +
-  geom_violin(position = pos, aes(fill = type), 
-              col = "grey30", alpha = 0.7, width = 1.2, lwd = 0.6) +
-  geom_boxplot(position = pos, aes(col = type), 
-               fill = "grey30", width = 0.03, lwd = 0.6) +
-  stat_summary(position = pos, aes(col = type), 
-               fun = "median", geom = "point", 
-               fill = "white", shape = 21, size = 1.5, stroke = 1) +
-  annotate(geom = "text", x = 3.4, y = 360, label = "c", fontface = "bold", size = 5) +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill = "white"),
-        axis.line = element_line(colour = "black"),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        legend.position = "none") +
+```{r}
+lidar_as_plot <- ggplot(
+  data = lidar_as, 
+  aes(x = type, 
+      y = raster_units)) +
+  
+  geom_violin(
+    position = pos, 
+    aes(fill = type), 
+    col = "grey30",
+    alpha = 0.7, 
+    width = 1.2, 
+    lwd = 0.6) +
+  
+  geom_boxplot(
+    position = pos, 
+    aes(col = type), 
+    fill = "grey30", 
+    width = 0.03, 
+    lwd = 0.6) +
+  
+  stat_summary(
+    position = pos, 
+    aes(col = type), 
+    fun = "median", 
+    geom = "point", 
+    fill = "white", 
+    shape = 21, 
+    size = 1.5, 
+    stroke = 1) +
+  
+  annotate(
+    geom = "text", 
+    x = 3.4, 
+    y = 360, 
+    label = "c", 
+    fontface = "bold", 
+    size = 5) +
+  
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "none") +
+  
   scale_colour_manual(values = c("grey30","grey30","grey30")) +
-  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
-  scale_fill_manual(values = viridis(3, begin = 0.9, end = 0.1)) +
-  xlab("") + ylab("Aspect (°)")
+  scale_x_discrete(   labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(  values = viridis(3, begin = 0.9, end = 0.1)) +
+  
+  xlab("") + 
+  ylab("Aspect (°)")
+
 print(lidar_as_plot)
 ```
 
 Plot understory and aspect by period.
 
 ```{r}
-lidar_us_period_noc <- ggplot(data = noc_lidar, 
-                              aes(x = period, y = understory*100)) +
-  geom_violin(position = pos, aes(fill = period), 
-              col = "grey30", alpha = 0.7, lwd = 0.6) +
-  geom_boxplot(position = pos, aes(col = period), 
-               fill = "grey30", width = 0.03, lwd = 0.6) +
-  stat_summary(position = pos, aes(col = period), 
-               fun = "median", geom = "point", 
-               fill = "white", shape = 21, size = 1.5, stroke = 1) +
-  annotate(geom = "text", x = 3.4, y = 31, label = "d", fontface = "bold", size = 5) +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill = "white"),
-        axis.line = element_line(colour = "black"),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        plot.title = element_text(hjust = 0.5),
-        legend.position = "none",
-        strip.background = element_rect(colour = "black", fill = "grey30"), 
-        strip.text = element_text(colour = "white")) +
+lidar_us_period_noc <- ggplot(
+  data = noc_lidar, 
+  aes(x = period, 
+      y = understory*100)) +
+  
+  geom_violin(
+    position = pos, 
+    aes(fill = period), 
+    col = "grey30", 
+    alpha = 0.7, 
+    lwd = 0.6) +
+  
+  geom_boxplot(
+    position = pos, 
+    aes(col = period), 
+    fill = "grey30", 
+    width = 0.03, 
+    lwd = 0.6) +
+  
+  stat_summary(
+    position = pos, 
+    aes(col = period), 
+    fun = "median", 
+    geom = "point", 
+    fill = "white", 
+    shape = 21, 
+    size = 1.5, 
+    stroke = 1) +
+  
+  annotate(
+    geom = "text", 
+    x = 3.4, 
+    y = 31, 
+    label = "d", 
+    fontface = "bold", 
+    size = 5) +
+  
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none",
+    strip.background = element_rect(colour = "black", fill = "grey30"), 
+    strip.text = element_text(colour = "white")) +
+  
   scale_colour_manual(values = c("grey30","grey30","grey30")) +
-  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
-  scale_fill_manual(values = viridis(3, begin = 0.9, end = 0.1)) +
-  xlab("Study period") + ylab("Understory cover (%)")
+  scale_x_discrete(   labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(  values = viridis(3, begin = 0.9, end = 0.1)) +
+  
+  xlab("Study period") + 
+  ylab("Understory cover (%)")
+
 print(lidar_us_period_noc)
+```
 
-lidar_as_period_noc <- ggplot(data = noc_lidar, 
-                              aes(x = period, y = aspect)) +
-  geom_violin(position = pos, aes(fill = period), 
-              col = "grey30", alpha = 0.7, lwd = 0.6) +
-  geom_boxplot(position = pos, aes(col = period), 
-               fill = "grey30", width = 0.03, lwd = 0.6) +
-  stat_summary(position = pos, aes(col = period), 
-               fun = "median", geom = "point", 
-               fill = "white", shape = 21, size = 1.5, stroke = 1) +
-  annotate(geom = "text", x = 3.4, y = 375, label = "e", fontface = "bold", size = 5) +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill = "white"),
-        axis.line = element_line(colour = "black"),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        plot.title = element_text(hjust = 0.5),
-        legend.position = "none") +
+
+```{r}
+lidar_as_period_noc <- ggplot(
+  data = noc_lidar, 
+  aes(x = period, 
+      y = aspect)) +
+  
+  geom_violin(
+    position = pos, 
+    aes(fill = period), 
+    col = "grey30", 
+    alpha = 0.7, 
+    lwd = 0.6) +
+  
+  geom_boxplot(
+    position = pos, 
+    aes(col = period), 
+    fill = "grey30", 
+    width = 0.03, 
+    lwd = 0.6) +
+  
+  stat_summary(
+    position = pos, 
+    aes(col = period), 
+    fun = "median", 
+    geom = "point", 
+    fill = "white", 
+    shape = 21, 
+    size = 1.5, 
+    stroke = 1) +
+  
+  annotate(
+    geom = "text", 
+    x = 3.4, 
+    y = 375, 
+    label = "e", 
+    fontface = "bold", 
+    size = 5) +
+  
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none") +
+  
   scale_colour_manual(values = c("grey30","grey30","grey30")) +
-  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
-  scale_fill_manual(values = viridis(3, begin = 0.9, end = 0.1)) +
-  xlab("Study period") + ylab("Aspect (°)")
+  scale_x_discrete(   labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(  values = viridis(3, begin = 0.9, end = 0.1)) +
+  
+  xlab("Study period") + 
+  ylab("Aspect (°)")
+
 print(lidar_as_period_noc)
+```
 
-lidar_os_period_diu <- ggplot(data = diu_lidar, 
-                              aes(x = period, y = overstory*100)) +
-  geom_violin(position = pos, aes(fill = period), 
-              col = "grey30", alpha = 0.7, lwd = 0.6) +
-  geom_boxplot(position = pos, aes(col = period), 
-               fill = "grey30", width = 0.03, lwd = 0.6) +
-  stat_summary(position = pos, aes(col = period), 
-               fun = "median", geom = "point", 
-               fill = "white", shape = 21, size = 1.5, stroke = 1) +
-  annotate(geom = "text", x = 3.4, y = 58, label = "f", fontface = "bold", size = 5) +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill = "white"),
-        axis.line = element_line(colour = "black"),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        plot.title = element_text(hjust = 0.5),
-        legend.position = "none") +
+```{r}
+lidar_os_period_diu <- ggplot(
+  data = diu_lidar, 
+  aes(x = period, 
+      y = overstory*100)) +
+  
+  geom_violin(
+    position = pos, 
+    aes(fill = period), 
+    col = "grey30", 
+    alpha = 0.7, 
+    lwd = 0.6) +
+  
+  geom_boxplot(
+    position = pos, 
+    aes(col = period), 
+    fill = "grey30", 
+    width = 0.03, 
+    lwd = 0.6) +
+  
+  stat_summary(
+    position = pos, 
+    aes(col = period), 
+    fun = "median", 
+    geom = "point", 
+    fill = "white", 
+    shape = 21, 
+    size = 1.5, 
+    stroke = 1) +
+  
+  annotate(
+    geom = "text", 
+    x = 3.4, 
+    y = 58, 
+    label = "f", 
+    fontface = "bold", 
+    size = 5) +
+  
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none") +
+  
   scale_colour_manual(values = c("grey30","grey30","grey30")) +
   scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
   scale_fill_manual(values = viridis(3, begin = 0.9, end = 0.1)) +
-  xlab("Study period") + ylab("Overstory cover (%)")
+  
+  xlab("Study period") + 
+  ylab("Overstory cover (%)")
+
 print(lidar_os_period_diu)
+```
 
-lidar_as_period_diu <- ggplot(data = diu_lidar, 
-                          aes(x = period, y = aspect)) +
-  geom_violin(position = pos, aes(fill = period), 
-              col = "grey30", alpha = 0.7, lwd = 0.6) +
-  geom_boxplot(position = pos, aes(col = period), 
-               fill = "grey30", width = 0.03, lwd = 0.6) +
-  stat_summary(position = pos, aes(col = period), 
-               fun = "median", geom = "point", 
-               fill = "white", shape = 21, size = 1.5, stroke = 1) +
-  annotate(geom = "text", x = 3.4, y = 375, label = "g", fontface = "bold", size = 5) +
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_rect(fill = "white"),
-        axis.line = element_line(colour = "black"),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        plot.title = element_text(hjust = 0.5),
-        legend.position = "none") +
+```{r}
+lidar_as_period_diu <- ggplot(
+  data = diu_lidar, 
+  aes(x = period, 
+      y = aspect)) +
+  
+  geom_violin(
+    position = pos, 
+    aes(fill = period), 
+    col = "grey30", 
+    alpha = 0.7, 
+    lwd = 0.6) +
+  
+  geom_boxplot(
+    position = pos, 
+    aes(col = period), 
+    fill = "grey30", 
+    width = 0.03, 
+    lwd = 0.6) +
+  
+  stat_summary(
+    position = pos, 
+    aes(col = period), 
+    fun = "median", 
+    geom = "point", 
+    fill = "white", 
+    shape = 21, 
+    size = 1.5, 
+    stroke = 1) +
+  
+  annotate(
+    geom = "text", 
+    x = 3.4, 
+    y = 375, 
+    label = "g", 
+    fontface = "bold", 
+    size = 5) +
+  
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none") +
+  
   scale_colour_manual(values = c("grey30","grey30","grey30")) +
-  scale_x_discrete(labels = wrap_format(3)) + #library(scales) +
-  scale_fill_manual(values = viridis(3, begin = 0.9, end = 0.1)) +
-  xlab("Study period") + ylab("Aspect (°)")
+  scale_x_discrete(   labels = wrap_format(3)) + #library(scales) +
+  scale_fill_manual(  values = viridis(3, begin = 0.9, end = 0.1)) +
+  
+  xlab("Study period") + 
+  ylab("Aspect (°)")
+
 print(lidar_as_period_diu)
 ```
 
@@ -2803,7 +3287,7 @@ data <- read.csv("output/coordinates curated.csv") %>%
 data_ltraj <- as.ltraj(
   xy = data[,c("easting", "northing")], 
   date = data$date_time_12hr, id = data$name, 
-  proj4string = CRS("EPSG:32755")) #plot(data_ltraj)
+  proj4string = CRS(utm)) #plot(data_ltraj)
 
 list <- data.frame(
   (rep(c(1:15), each = 15)), #change to unique(data$name)
@@ -2882,7 +3366,7 @@ data_ltraj <- as.ltraj(
   xy = baseline[,c("easting", "northing")], 
   date = baseline$date_time_12hr, 
   id = baseline$name, 
-  proj4string = CRS("EPSG:32755")) #plot(data_ltraj)
+  proj4string = CRS(utm)) #plot(data_ltraj)
 
 list <- data.frame(
   (rep(c(1:7), each = 7)), #change to unique(data$name)
@@ -2961,7 +3445,7 @@ data_ltraj <- as.ltraj(
   xy = release[,c("easting", "northing")], 
   date = release$date_time_12hr, 
   id = release$name, 
-  proj4string = CRS("EPSG:32755")) #plot(data_ltraj)
+  proj4string = CRS(utm)) #plot(data_ltraj)
 
 list <- data.frame(
   (rep(c(1:14), each = 14)), #change to unique(data$name)
@@ -3039,7 +3523,7 @@ settlement <- data %>%
 data_ltraj <- as.ltraj(
   xy = settlement[,c("easting", "northing")], 
   date = settlement$date_time_12hr, id = settlement$name, 
-  proj4string = CRS("EPSG:32755")) #plot(data_ltraj)
+  proj4string = CRS(utm)) #plot(data_ltraj)
 
 list <- data.frame(
   (rep(c(1:10), each = 10)), #change to unique(data$name)
@@ -3224,7 +3708,7 @@ coden <- read_excel(raw_data, sheet = "dens") %>%
   # Remove irrelevant dates
   subset(night >= 3 & night <= 52) %>% 
   subset(ifelse(cohort == "Resident", night <= 32, night >= 22)) %>%
-  dplyr::select(name, morph, cohort, period, coden, eqd_code) %>%
+  select(name, morph, cohort, period, coden, eqd_code) %>%
   mutate(bin = ifelse(coden == "Alone", 0, 1)) %>%
   rename(den = eqd_code)
 
